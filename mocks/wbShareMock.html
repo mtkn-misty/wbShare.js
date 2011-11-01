@@ -1,0 +1,204 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF8">
+    <title>モック</title>
+    <style type="text/css">
+        body {
+            /*margin: 0;*/
+        }
+
+        #canvas, #canvas2 {
+            border: #000000 solid 32px;
+            float: left;
+        }
+
+        #drawData {
+            background: #fafaaa;
+            height: auto;
+            width: auto;
+            float: left;
+        }
+
+    </style>
+</head>
+<body>
+<canvas id="canvas" height="500" width="500">
+</canvas>
+<div data-role="fieldcontain" data-inline="true">
+	<label for="select-line-width" class="select">Pen Size: </label>
+	<select name="select-line-width" id="select-line-width">
+		<option value="small">small</option>
+		<option value="normal">normal</option>
+		<option value="large">large</option>
+	</select>
+</div>
+<ul>
+    <li>
+        <label>
+            <input id="lineWidthBtn" type="button" value="線幅"/>
+            <input id="lineWidthTxt" type="text" value="1"/>
+        </label>
+    </li>
+    <li>
+        <label>
+            <input id="colorBtn" type="button" value="色変更"/>
+            <input id="colorTxt" type="text" value="#000000"/>
+        </label>
+    </li>
+    <li>
+        <input id="lineBtn" type="button" value="Line"/>
+    </li>
+    <li>
+        <input id="freeBtn" type="button" value="Free Hand"/>
+    </li>
+    <li>
+        <input id="rectBtn" type="button" value="Rect"/>
+    </li>
+    <li>
+        <input id="circleBtn" type="button" value="Circle"/>
+    </li>
+    <li>
+        <input id="textBtn" type="button" value="Text"/>
+        <input id="inputTxt" type="text" value="hogeほげ"/>
+    </li>
+    <li>
+        <input id="imgBtn" type="button" value="Img"/>
+        <img id="pasteImg" src="http://blog.chrisryu.com/img/060909_01.jpg" width="20%" height="20%"/>
+    </li>
+    <li>
+        <label>
+            塗り潰し（未実装）
+            <input id="fillChk" type="checkbox" value=false/>
+        </label>
+    </li>
+    <li>
+        ここから下はサーバから飛んでくるコマンドを模したもの
+    </li>
+    <li>
+        <input id="lineDataBtn" type="button" value="Lineデータ投入"/>
+    </li>
+    <li>
+        <input id="freeDataBtn" type="button" value="Free Handデータ投入"/>
+    </li>
+    <li>
+        <input id="rectDataBtn" type="button" value="Rectデータ投入"/>
+    </li>
+    <li>
+        <input id="circleDataBtn" type="button" value="Circleデータ投入"/>
+    </li>
+    <li>
+        <input id="textDataBtn" type="button" value="Textデータ投入"/>
+    </li>
+    <li>
+        <input id="clearBarBtn" type="button" value="uid=barのみクリア"/>
+    </li>
+</ul>
+
+<canvas id="canvas2" height="500" width="500">
+</canvas>
+<ul>
+    <li>
+        <label>
+            <input id="lineWidthBtn2" type="button" value="線幅"/>
+            <input id="lineWidthTxt2" type="text" value="1"/>
+        </label>
+    </li>
+    <li>
+        <label>
+            <input id="colorBtn2" type="button" value="色変更"/>
+            <input id="colorTxt2" type="text" value="#000000"/>
+        </label>
+    </li>
+    <li>
+        <input id="lineBtn2" type="button" value="Line"/>
+    </li>
+    <li>
+        <input id="freeBtn2" type="button" value="Free Hand"/>
+    </li>
+    <li>
+        <input id="rectBtn2" type="button" value="Rect"/>
+    </li>
+    <li>
+        <input id="circleBtn2" type="button" value="Circle"/>
+    </li>
+    <li>
+        <input id="textBtn2" type="button" value="Text"/>
+        <input id="inputTxt2" type="text" value="hogeほげ"/>
+    </li>
+    <li>
+        <input id="imgBtn2" type="button" value="Img"/>
+        <img id="pasteImg2" src="http://blog.chrisryu.com/img/060909_01.jpg" width="20%" height="20%"/>
+    </li>
+    <li>
+        <label>
+            塗り潰し（未実装）
+            <input id="fillChk2" type="checkbox" value=false/>
+        </label>
+    </li>
+    <li>
+        ここから下はサーバから飛んでくるコマンドを模したもの
+    </li>
+    <li>
+        <input id="lineDataBtn2" type="button" value="Lineデータ投入"/>
+    </li>
+    <li>
+        <input id="freeDataBtn2" type="button" value="Free Handデータ投入"/>
+    </li>
+    <li>
+        <input id="rectDataBtn2" type="button" value="Rectデータ投入"/>
+    </li>
+    <li>
+        <input id="circleDataBtn2" type="button" value="Circleデータ投入"/>
+    </li>
+    <li>
+        <input id="textDataBtn2" type="button" value="Textデータ投入"/>
+    </li>
+    <li>
+        <input id="clearBarBtn2" type="button" value="uid=barのみクリア"/>
+    </li>
+</ul>
+
+<p>送信するためのデータ↓（consoleにも同じものを吐いている）</p>
+<textarea id="drawData"></textarea>
+
+<div id="drawDataDiv"></div>
+
+<script type="text/javascript" src="../../libs/jquery-1.6.2.js">
+</script>
+<script type="text/javascript" src="../../libs/jqmobile/jquery.mobile-1.0b2.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/utils/UID.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/geom/Matrix2D.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/events/MouseEvent.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/display/DisplayObject.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/display/Container.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/display/Stage.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/display/Graphics.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/display/Shape.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/display/SpriteSheet.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/display/Text.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/display/Bitmap.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/utils/SpriteSheetUtils.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/utils/Ticker.js">
+</script>
+<script type="text/javascript" src="../../libs/easel/utils/UID.js">
+</script>
+<script type="text/javascript" src="../wbShare.js">
+</script>
+<script type="text/javascript" src="wbShareMock.js">
+</script>
+</body>
+</html>
