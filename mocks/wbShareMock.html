@@ -5,11 +5,11 @@
     <title>モック</title>
     <style type="text/css">
         body {
-            /*margin: 0;*/
+            margin: 0;
         }
 
         #canvas, #canvas2 {
-            border: #000000 solid 32px;
+            border: #000000 solid 1px;
             float: left;
         }
 
@@ -25,14 +25,6 @@
 <body>
 <canvas id="canvas" height="500" width="500">
 </canvas>
-<div data-role="fieldcontain" data-inline="true">
-	<label for="select-line-width" class="select">Pen Size: </label>
-	<select name="select-line-width" id="select-line-width">
-		<option value="small">small</option>
-		<option value="normal">normal</option>
-		<option value="large">large</option>
-	</select>
-</div>
 <ul>
     <li>
         <label>
@@ -164,39 +156,37 @@
 
 <div id="drawDataDiv"></div>
 
-<script type="text/javascript" src="../../libs/jquery-1.6.2.js">
+<script type="text/javascript" src="../libs/jquery-1.6.2.js">
 </script>
-<script type="text/javascript" src="../../libs/jqmobile/jquery.mobile-1.0b2.js">
+<script type="text/javascript" src="../libs/easel/utils/UID.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/utils/UID.js">
+<script type="text/javascript" src="../libs/easel/geom/Matrix2D.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/geom/Matrix2D.js">
+<script type="text/javascript" src="../libs/easel/events/MouseEvent.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/events/MouseEvent.js">
+<script type="text/javascript" src="../libs/easel/display/DisplayObject.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/display/DisplayObject.js">
+<script type="text/javascript" src="../libs/easel/display/Container.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/display/Container.js">
+<script type="text/javascript" src="../libs/easel/display/Stage.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/display/Stage.js">
+<script type="text/javascript" src="../libs/easel/display/Graphics.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/display/Graphics.js">
+<script type="text/javascript" src="../libs/easel/display/Shape.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/display/Shape.js">
+<script type="text/javascript" src="../libs/easel/display/SpriteSheet.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/display/SpriteSheet.js">
+<script type="text/javascript" src="../libs/easel/display/Text.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/display/Text.js">
+<script type="text/javascript" src="../libs/easel/display/Bitmap.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/display/Bitmap.js">
+<script type="text/javascript" src="../libs/easel/utils/SpriteSheetUtils.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/utils/SpriteSheetUtils.js">
+<script type="text/javascript" src="../libs/easel/utils/Ticker.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/utils/Ticker.js">
+<script type="text/javascript" src="../libs/easel/utils/UID.js">
 </script>
-<script type="text/javascript" src="../../libs/easel/utils/UID.js">
-</script>
-<script type="text/javascript" src="../wbShare.js">
+<script type="text/javascript" src="../wbShare.js/wbShare.js">
 </script>
 <script type="text/javascript" src="wbShareMock.js">
 </script>

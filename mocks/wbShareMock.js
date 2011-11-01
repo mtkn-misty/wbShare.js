@@ -1,623 +1,2671 @@
+/**
+ * Created by JetBrains WebStorm.
+ * User: mtkn
+ * Date: 11/09/03
+ * Time: 22:16
+ * To change this template use File | Settings | File Templates.
+ */
 $(function() {
-	//定数///////////////////
-	//前処理・後処理のタイプとドローモードの対応付け．
-	//modeにしたがって，前後処理のタイプを分ける
-	var baseProcType = {
-		line: 'shape',	//図形 描画終了と共に一回だけデータを送る
-		rect: 'shape',
-		circle: 'shape',
-		free: 'free',	//フリーハンド 描画時は常に座標データを送る
-		text: 'text',	//文字列 描画終了と共に一回だけデータを送る
-		img: 'img'	//画像 描画終了と共に一回だけデータを送る
-	};
+	$('#canvas').wbShare('hoge').wbShareSetSendFunction(function(command, options) {
 
-	$.fn.extend({
-		/**
-		 * wbShareをCanvas要素に対して適用する
-		 */
-		wbShare: function(userId) {
-			this.filter('canvas').each(function() {
-				//Canvasの１インスタンスを通しての状態変数/////////////////////
-				var uid = userId;
-				var canvas = $(this);
-
-				var stage = new Stage(canvas[0]);
-				var shapes = []; //shapeを作成した順に格納しておく物　uidゴトに分けて図形オブジェクトへの参照を持っておく
-				shapes[uid] = [];
-
-				var shape; //今現在描画しているオブジェクト
-				var receivedShapes = [];	//他者から今まさに受信しているオブジェクト．他者のuid属性で名前空間を切ってそこに値を入れる
-
-				var stPoint = { //今描いている図形の始点
-					x: 0,
-					y: 0
-				};
-
-				var beforeCoor = {	//mousedown/mouseup, touchstart/touchendの間において直前に取得した座標
-					x: 0,
-					y: 0
-				};
-
-				//ワーク用のIMG要素作成
-				var workImgId = '__wbShareWork__' + (new Date().getTime());
-				setTimeout(function() {
-					$('body').append(
-						$('<img id="' + workImgId + '"/>')
-							.css('visibility', 'hidden')
-							.css('width', 0)
-							.css('height', 0));
-				}, 0);
-
-				//状態変数の定義
-				var status = {
-					stage: stage,
-					shapes: shapes,
-					receivedShapes: receivedShapes,
-					text: '',
-					img: undefined,
-					workImgId: workImgId,
-					color: '#000000',
-					mode: 'free',
-					lineWidth: 2,
-					font: '22px Arial',
-					sendFunc: function() {
-					}
-				};
-
-				canvas.data('wbShareStatus', status);
-
-				//TODO: 塗り潰しは未実装
-
-				//Util ipad - PCのイベント差吸収系/////////////
-				//iPadは検証環境がないので検証していない・・注意（高野）
-
-				//キャンバスの場所をキャッシュする（高速化のため．ただしCanvasの場所をあとから変えたいときはこの値を更新する必要がある）
-				var offset = canvas.offset();
-				var getCanvasCoor = function(e) {
-					//jQuery's event object unsupports touche events, so we use the object of "window.event"
-					if (event.touches) {//タッチ系のイベントが存在する場合
-						var touches = event.touches[0];
-						if (touches) {
-							var coor = {
-								x: touches.pageX - offset.left,
-								y: touches.pageY - offset.top
-							};
-							beforeCoor = coor;	//直前に返した座標を覚えておく．以下のelse文以降のため
-							return coor;
-						} else {
-							//タッチ系のイベントだが，値が取れないとき（touchendなど）は直前に返した値を返す
-							return beforeCoor;
-						}
-					}
-					else { //iPad以外の場合
-						return {
-							x: e.pageX - offset.left,
-							y: e.pageY - offset.top
-						};
-					}
-				};
-
-
-				//コントローラ/////////////
-				//描画イベント//
-
-				//書き始めるイベント
-				var drawStartEvent = function(e) {
-					e.preventDefault();
-
-					var status = canvas.data('wbShareStatus');
-
-					//前処理
-					var coor = getCanvasCoor(e);
-					var graphics = beforeDrawStartProc(e, coor);
-
-					//コマンド実行
-					drawStartCommands[status.mode](graphics, coor);
-
-					//後処理
-					afterDrawStartProc(e, coor);
-				};
-				canvas.bind('touchstart', drawStartEvent);
-				canvas.bind('mousedown', drawStartEvent);
-
-				//書いている際のイベント
-				var drawingEvent = function(e) {
-					e.preventDefault();
-					if (shape) {
-						var status = canvas.data('wbShareStatus');
-						//前処理
-						var coor = getCanvasCoor(e);
-						var graphics = beforeDrawingProc(e, coor);
-
-						//コマンド実行
-						drawingCommands[status.mode](graphics, coor);
-
-						//後処理
-						afterDrawingProc(e, coor);
-					}
-				};
-				canvas.bind('touchmove', drawingEvent);
-				canvas.bind('mousemove', drawingEvent);
-
-				//書き終わった際のイベント
-				var drawFinEvent = function(e) {
-					e.preventDefault();
-					if (shape) {
-						var status = canvas.data('wbShareStatus');
-						//前処理
-						var coor = getCanvasCoor(e);
-						var graphics = beforeDrawFinProc(e, coor);
-
-						//コマンド実行
-						drawFinCommands[status.mode](graphics, coor);
-
-						//後処理
-						afterDrawFinProc(e, coor);
-					}
-				};
-				canvas.bind('touchend', drawFinEvent);
-				canvas.bind('mouseup', drawFinEvent);
-
-				//マウス／タッチイベントの前処理・後処理////////////////////////
-				var beforeDrawStartProc = function(e, coor) {
-					shape = new Shape();
-					stage.addChild(shape);
-					var status = canvas.data('wbShareStatus');
-
-					if (baseProcType[status.mode] === 'text') {
-						return new Text(status.text, status.font, status.color);
-					} else if (baseProcType[status.mode] === 'img') {
-						return new Bitmap(status.img);
-					} else {
-						if (baseProcType[status.mode] === 'free') {
-							send({
-								uid: uid,
-								command: 'draw',
-								options: {
-									mode: status.mode,
-									color: status.color,
-									lineWidth: status.lineWidth,
-									strokeState: 'start',
-									points: [coor]
-								}
-							});
-						}
-
-						var graphics = shape.graphics;
-
-						graphics.setStrokeStyle(status.lineWidth, 1, 1)//描画スタイル（線の幅）の設定
-							.beginStroke(status.color);//書き込み1単位 開始
-						return graphics;
-					}
-				}
-
-				var afterDrawStartProc = function(e, coor) {
-					//始点を保存
-					stPoint = coor;
-				}
-
-				var beforeDrawingProc = function(e, coor) {
-					var status = canvas.data('wbShareStatus');
-					if (baseProcType[status.mode] === 'free') {//フリーハンドの場合
-						//サーバに描画データを送信する
-						send({
-							uid: uid,
-							command: 'draw',
-							options: {
-								mode: status.mode,
-								color: status.color,
-								lineWidth: status.lineWidth,
-								strokeState: 'drawing',
-								points: [coor]
-							}
-						});
-					} else if (baseProcType[status.mode] === 'shape') {
-						//図形の描画は今まさに描こうとしている状態を見えるようにしたいのでマウスが動くたびに削除して書きなおす
-						var graphics = shape.graphics;
-						graphics.endStroke();
-						stage.removeChild(shape);
-						shape = new Shape();
-						stage.addChild(shape);
-
-						shape.graphics.setStrokeStyle(status.lineWidth, 1, 1)//描画スタイル（線の幅）の設定
-							.beginStroke(status.color);//書き込み1単位 開始
-						//graphics.beginFill(color);
-					}
-
-					return shape.graphics;
-				}
-
-				var afterDrawingProc = function(e, coor) {
-					stage.update();
-				}
-
-				var beforeDrawFinProc = function(e, coor) {
-					var status = canvas.data('wbShareStatus');
-					if (baseProcType[status.mode] === 'shape') {
-						//図形の描画は今まさに描こうとしている状態を見えるようにしたいのでマウスが動くたびに削除して書きなおす
-						var graphics = shape.graphics;
-						graphics.endStroke();
-						stage.removeChild(shape);
-						shape = new Shape();
-						stage.addChild(shape);
-
-						shape.graphics.setStrokeStyle(status.lineWidth, 1, 1)//描画スタイル（線の幅）の設定
-							.beginStroke(status.color);//書き込み1単位 開始
-						//graphics.beginFill(color);
-					}
-					//TODO: 回転とかするときはここでクリックイベントを定義する？
-					//		var selfShape = shape;
-					//		shape.onClick = function(e){
-					//			selfShape.skewX = 45;
-					//			selfShape.skewY = 45;
-					//        	stage.update();
-					//		};
-					return shape.graphics;
-				}
-
-				var afterDrawFinProc = function(e, coor) {
-					//描画系後処理
-					stage.update();
-
-					//自分の書いた図形を保存しておく
-					shapes[uid].push(shape);
-
-					var status = canvas.data('wbShareStatus');
-					status.shapes = shapes;
-					canvas.data('wbShareStatus', status);
-					
-					if (baseProcType[status.mode] === 'shape' || baseProcType[status.mode] === 'free') {
-						//文字列処理以外はここでストロークを終わらせる
-						shape.graphics.endStroke();
-
-						//サーバに描画データを送信する
-						send({
-							uid: uid,
-							command: 'draw',
-							options: {
-								mode: status.mode,
-								color: status.color,
-								lineWidth: status.lineWidth,
-								strokeState: 'fin',
-								points: [coor]
-							}
-						});
-					}
-					else if (baseProcType[status.mode] === 'text') {
-						//サーバに描画データを送信する
-						send({
-							uid: uid,
-							command: 'draw',
-							options: {
-								mode: status.mode,
-								color: status.color,
-								font: status.font,
-								strokeState: 'fin',
-								points: [coor]
-							}
-						});
-					}
-					else if (baseProcType[status.mode] === 'img') {
-						//サーバに描画データを送信する
-						send({
-							uid: uid,
-							command: 'draw',
-							options: {
-								mode: status.mode,
-								url: $(status.img).attr('src'),
-								strokeState: 'fin',
-								points: [coor]
-							}
-						});
-					}
-					shape = undefined;
-				}
-
-				//ロジック///////////////////////////////
-				var drawStartCommands = {
-					line: function(graphics, coor) {
-						graphics.moveTo(coor.x, coor.y);
-					},
-					free: function(graphics, coor) {
-						graphics.moveTo(coor.x, coor.y);
-					},
-					rect: function(graphics, coor) {
-					},
-					circle:  function(graphics, coor) {
-					},
-					text:  function(text, coor) {
-						text.x = coor.x;
-						text.y = coor.y;
-						stage.addChild(text);
-						shape = text;
-						stage.update();
-					},
-					img: function(bitmap, coor) {
-						bitmap.x = coor.x;
-						bitmap.y = coor.y;
-						stage.addChild(bitmap);
-						shape = bitmap;
-						stage.update();
-					}
-				};
-
-				var drawingCommands = {
-					line: function(graphics, coor) {
-						graphics.moveTo(stPoint.x, stPoint.y).lineTo(coor.x, coor.y);
-					},
-					free: function(graphics, coor) {
-						graphics.lineTo(coor.x, coor.y);
-					},
-					rect: function(graphics, coor) {
-						graphics.rect(stPoint.x, stPoint.y, coor.x - stPoint.x, coor.y - stPoint.y);
-					},
-					circle:  function(graphics, coor) {
-						var r = Math.sqrt((coor.x - stPoint.x) * (coor.x - stPoint.x) + (coor.y - stPoint.y) * (coor.y - stPoint.y));
-						graphics.drawCircle(stPoint.x, stPoint.y, r);
-					},
-					text:  function(graphics, coor) {
-						shape.x = coor.x;
-						shape.y = coor.y;
-						stage.update();
-					},
-					img: function(graphics, coor) {
-						shape.x = coor.x;
-						shape.y = coor.y;
-						stage.update();
-					}
-				};
-
-				var drawFinCommands = {
-					line: function(graphics, coor) {
-						graphics.moveTo(stPoint.x, stPoint.y).lineTo(coor.x, coor.y);
-					},
-					free: function(graphics, coor) {
-						//TODO: これだと，始点と終点が同じならば，筆を動かしていても点と判断してしまうので，要対応
-						if (coor.x === stPoint.x && coor.y === stPoint.y) {
-							//全く動いてないときは線でなくて小さい四角を書く
-							graphics.rect(coor.x, coor.y, 1, 1);
-						}
-						graphics.lineTo(coor.x, coor.y);
-					},
-					rect: function(graphics, coor) {
-						graphics.rect(stPoint.x, stPoint.y, coor.x - stPoint.x, coor.y - stPoint.y);
-					},
-					circle:  function(graphics, coor) {
-						var r = Math.sqrt((coor.x - stPoint.x) * (coor.x - stPoint.x) + (coor.y - stPoint.y) * (coor.y - stPoint.y));
-						graphics.drawCircle(stPoint.x, stPoint.y, r);
-					},
-					text:  function(graphics, coor) {
-						shape.x = coor.x;
-						shape.y = coor.y;
-						stage.update();
-					},
-					img:  function(graphics, coor) {
-						shape.x = coor.x;
-						shape.y = coor.y;
-						stage.update();
-					}
-				};
-
-
-				//データ送信関数（一般）
-				var send = function(command, options) {
-					//ユーザが設定した関数呼び出し．
-					//ここにはデータ送信用の関数を設定していただく
-					var status = canvas.data('wbShareStatus');
-					status.sendFunc(command, options);
-				}
-			});
-
-			return this;
-		},
-		/**
-		 * Canvasへのテキスト入力のための文字列を設定する．
-		 * @param txt 入力するテキスト
-		 */
-		wbShareSetText: function(txt) {
-			var canvas = this;
-			var status = canvas.data('wbShareStatus');
-			status.text = txt;
-			canvas.data('wbShareStatus', status);
-			return canvas;
-		},
-		/**
-		 * Canvasへ貼り付ける画像を設定する．
-		 * @param url 画像のURL
-		 */
-		wbShareSetImg: function(url) {
-			var canvas = this;
-			//TODO: factorがIMG, canvas, videoであることを確認する
-			var status = canvas.data('wbShareStatus');
-			var workImgId = status.workImgId;
-
-			status.img = $('#' + workImgId).attr('src', url)[0];
-			canvas.data('wbShareStatus', status);
-			return canvas;
-		},
-		wbShareSetColor: function(clr) {
-			var canvas = this;
-			var status = canvas.data('wbShareStatus');
-			status.color = clr;
-			canvas.data('wbShareStatus', status);
-			return canvas;
-		},
-		wbShareSetMode: function(md) {
-			var canvas = this;
-			var status = canvas.data('wbShareStatus');
-			status.mode = md;
-			canvas.data('wbShareStatus', status);
-			return canvas;
-		},
-		wbShareSetLineWidth: function(width) {
-			var canvas = this;
-			var status = canvas.data('wbShareStatus');
-			status.lineWidth = width;
-			canvas.data('wbShareStatus', status);
-			return canvas;
-		},
-		wbShareSetFont: function(fnt) {
-			var canvas = this;
-			var status = canvas.data('wbShareStatus');
-			status.font = fnt;
-			canvas.data('wbShareStatus', status);
-			return canvas;
-		},
-		wbShareSetSendFunction: function(func) {
-			var canvas = this;
-			var status = canvas.data('wbShareStatus');
-			status.sendFunc = func;
-			canvas.data('wbShareStatus', status);
-			return canvas;
-		},
-		wbShareClear: function() {
-			var canvas = this;
-			$.each(shapes, function(i, eachUidShapes) {
-				var clearShapes = eachUidShapes;
-				if (clearShapes) {
-					for (var i in clearShapes) {
-						stage.removeChild(clearShapes[i]);
-					}
-					shapes[uid] = [];	//画面から削除したので参照もクリアする
-					stage.update();
-				}
-			});
-			send({
-				uid: undefined,
-				command: 'clear',
-				options: undefined
-			});
-			return canvas;
-		},
-		/**
-		 * 図形情報データの受信関数
-		 * データを受信して図形を描画する
-		 */
-		wbShareDrawShape: function(uid, command, options) {
-			var canvas = this;
-
-			var status = canvas.data('wbShareStatus');
-			var stage = status.stage;
-			var shapes = status.shapes;
-
-			if (command === 'draw') {
-				var receivedShape;
-				if (baseProcType[options.mode] === 'shape') {
-
-					receivedShape = new Shape();
-					stage.addChild(receivedShape);
-
-					var receivedGraphics = receivedShape.graphics;
-
-					receivedGraphics.setStrokeStyle(options.lineWidth)//描画スタイル（線の幅）の設定
-						.beginStroke(options.color);//書き込み1単位 開始
-					canvas.wbShareDrawOneStroke[options.mode](receivedGraphics, options);
-
-					stage.update();
-					receivedGraphics.endStroke();
-				} else if (baseProcType[options.mode] === 'free') {
-					receivedShape = status.receivedShapes[options.uid];
-
-					if (options.strokeState === 'start') {
-						receivedShape = new Shape(); //受信中オブジェクトに保存
-						status.receivedShapes[options.uid] = receivedShape;
-						stage.addChild(receivedShape);
-					}
-
-					var receivedGraphics = receivedShape.graphics;
-
-					//以下の処理はstartの時以外に実施すると2回目以降なにも表示されなくなってしまう
-					if (options.strokeState === 'start') {
-						receivedGraphics.setStrokeStyle(options.lineWidth)//描画スタイル（線の幅）の設定
-							.beginStroke(options.color);//書き込み1単位 開始
-					}
-
-					canvas.wbShareDrawOneStroke[options.mode](receivedGraphics, options);
-
-					stage.update();
-
-					if (options.strokeState === 'fin') {
-						receivedGraphics.endStroke();
-						status.receivedShapes[uid] = undefined;
-					}
-				} else if (baseProcType[options.mode] === 'text') {
-					var receivedShape = new Text(options.text, options.font, options.color);
-					receivedShape.x = options.points[0].x;
-					receivedShape.y = options.points[0].y;
-					stage.addChild(receivedShape);
-					stage.update();
-				}
-
-				//uidゴトに分けて図形オブジェクトへの参照を持っておく
-
-				if (!shapes[uid]) {
-					shapes[uid] = [];
-				}
-				shapes[uid].push(receivedShape);
-
-			} else if (command === 'clear') {
-				var clearShapes = shapes;
-				if(uid) {
-					clearShapes = [];
-					clearShapes.push(shapes[uid]);
-				}
-				$.each(clearShapes, function(i, eachUidShapes) {
-
-					if (eachUidShapes) {
-						for (var i in eachUidShapes) {
-							stage.removeChild(eachUidShapes[i]);
-						}
-						shapes[uid] = [];	//画面から削除したので参照もクリアする
-						stage.update();
-					}
-				});
-
-			}
-			canvas.data('wbShareStatus', status);
-			return canvas;
-		},
-		wbShareDrawOneStroke: {
-			//フリーハンドの描画
-			free: function(graphics, options) {
-				var pts = options.points;
-				//TODO: これだと全く筆を動かさなかった「点」に対応出来ていないので，要対応
-				if (options.strokeState === 'start') {
-					graphics.moveTo(pts[0].x, pts[0].y);
-				}
-				else {
-					graphics.lineTo(pts[0].x, pts[0].y);
-				}
-			},
-			//直線の描画
-			line: function(graphics, options) {
-				var pts = options.points;
-				graphics.moveTo(pts[0].x, pts[0].y).lineTo(pts[1].x, pts[1].y);
-			},
-			//四角形の描画
-			rect: function(graphics, options) {
-				var pts = options.points;
-				graphics.rect(pts[0].x, pts[0].y, pts[1].x - pts[0].x, pts[1].y - pts[0].y);
-			},
-			//円形の描画
-			circle: function(graphics, options) {
-				var pts = options.points;
-				var r = Math.sqrt((pts[0].x - pts[1].x) * (pts[0].x - pts[1].x) + (pts[0].y - pts[1].y) * (pts[0].y - pts[1].y));
-				graphics.drawCircle(pts[0].x, pts[0].y, r);
-			}
-		},
-		wbShareSendClear: function() {
-			//TODO
-//			var canvas = this;
-//			send({
-//				uid: uid,
-//				command: 'clear',
-//				options: undefined
-//			});
-			return canvas;
-		},
-		wbShareGetStageObj: function() {
-			return this.data('wbShareStatus').stage;
+		console.log(JSON.stringify(command, options))
+//		//TODO: あとで消す
+//		$('#drawDataDiv').html(
+//			$('#drawDataDiv').html() +
+//				JSON.stringify(command, options) + '<br/>'
+//		);
+	});
+//描画モードの変更
+	$('#select-line-width').change(function(e){
+		var width = $(this).val();
+		if(width === 'small') {
+			$('#canvas').wbShareSetLineWidth(2);
+		} else if(width === 'normal') {
+			$('#canvas').wbShareSetLineWidth(8);
+		} else if(width === 'large') {
+			$('#canvas').wbShareSetLineWidth(16);
+		} else {
+			$('#canvas').wbShareSetLineWidth(40);
 		}
 	});
-});
+	$('input[name=shape]').change(function(e){
+		$('#canvas').wbShareSetMode($('input[name=shape]:checked').val());
+	});
 
+	$('#lineBtn').click(function(e) {
+		$('#canvas').wbShareSetMode('line');
+	});
+	$('#freeBtn').click(function(e) {
+		$('#canvas').wbShareSetMode('free');
+	});
+	$('#rectBtn').click(function(e) {
+		$('#canvas').wbShareSetMode('rect');
+	});
+	$('#circleBtn').click(function(e) {
+		$('#canvas').wbShareSetMode('circle');
+	});
+	$('#textBtn').click(function(e) {
+		$('#canvas').wbShareSetMode('text');
+		$('#canvas').wbShareSetText($('#inputTxt').val());
+	});
+
+	$('#imgBtn').click(function(e) {
+		$('#canvas').wbShareSetMode('img');
+		$('#canvas').wbShareSetImg($('#pasteImg').attr('src'));
+	});
+	$('#lineWidthBtn').click(function(e) {
+		$('#canvas').wbShareSetLineWidth($('#lineWidthTxt').val());
+	});
+	$('#colorBtn').click(function(e) {
+		$('#canvas').wbShareSetColor($('#colorTxt').val());
+	});
+
+	$('#lineDataBtn').click(function(e) {
+		//適当にデータ生成して投入する
+		var receivedData = {"uid": "foo", "command":"draw","options":{"mode":"line","color":"#ff0ff0","lineWidth":"10","points":[
+			{"x":410,"y":32},
+			{"x":455,"y":128},
+			{"x":329,"y":47},
+			{"x":329,"y":46}
+		]}}
+
+		//他の作業中にも描画可能かどうかを調べるためにちょっと動作を遅らせる
+		setTimeout(function() {
+			$('#canvas').wbShareDrawShape(receivedData.uid, receivedData.command, receivedData.options)
+		}, 1000);
+	});
+
+	$('#freeDataBtn').click(function(e) {
+		//適当にデータ生成して投入する
+		var receivedData = [
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"start","points":[
+				{"x":357,"y":53}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":357,"y":54}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":357,"y":55}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":357,"y":56}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":59}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":353,"y":61}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":349,"y":65}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":345,"y":70}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":343,"y":73}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":342,"y":75}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":339,"y":78}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":332,"y":88}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":328,"y":94}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":325,"y":105}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":327,"y":118}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":329,"y":124}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":330,"y":130}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":332,"y":136}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":333,"y":142}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":336,"y":149}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":337,"y":157}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":339,"y":161}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":341,"y":165}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":343,"y":170}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":345,"y":177}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":347,"y":183}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":349,"y":187}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":350,"y":191}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":352,"y":195}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":354,"y":200}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":210}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":213}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":216}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":354,"y":219}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":353,"y":221}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":351,"y":224}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":349,"y":228}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":346,"y":231}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":342,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":337,"y":240}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":332,"y":245}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":325,"y":249}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":317,"y":253}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":310,"y":257}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":301,"y":260}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":281,"y":267}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":271,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":260,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":245,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":239,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":226,"y":267}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":222,"y":265}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":219,"y":263}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":218,"y":261}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":216,"y":258}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":255}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":213,"y":252}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":248}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":210,"y":244}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":208,"y":239}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":206,"y":232}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":203,"y":224}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":201,"y":216}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":199,"y":207}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":197,"y":203}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":197,"y":199}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":197,"y":193}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":197,"y":187}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":197,"y":181}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":200,"y":176}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":200,"y":170}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":201,"y":165}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":204,"y":161}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":204,"y":158}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":204,"y":156}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":205,"y":155}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":206,"y":154}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":207,"y":154}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":207,"y":155}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":207,"y":156}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":207,"y":157}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":159}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":160}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":211,"y":162}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":164}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":213,"y":166}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":213,"y":169}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":171}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":173}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":175}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":176}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":177}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":178}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":179}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":180}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":182}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":184}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":186}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":188}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":190}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":191}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":192}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":193}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":194}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":216,"y":197}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":216,"y":199}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":217,"y":202}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":219,"y":205}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":223,"y":212}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":225,"y":215}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":228,"y":219}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":229,"y":220}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":234,"y":224}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":240,"y":229}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":247,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":254,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":259,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":264,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":269,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":274,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":279,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":285,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":290,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":295,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":296,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":299,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":303,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":307,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":309,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":311,"y":237}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":311,"y":238}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":312,"y":240}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":243}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":246}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":250}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":253}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":258}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":265}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":272}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":311,"y":279}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":311,"y":286}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":310,"y":290}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":310,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":308,"y":300}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":307,"y":305}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":304,"y":310}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":303,"y":314}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":300,"y":317}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":298,"y":320}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":296,"y":321}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":293,"y":323}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":291,"y":324}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":288,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":285,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":281,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":276,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":269,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":264,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":258,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":252,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":246,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":240,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":234,"y":323}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":229,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":226,"y":320}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":222,"y":318}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":217,"y":316}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":312}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":309}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":206,"y":307}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":202,"y":303}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":196,"y":297}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":189,"y":292}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":181,"y":287}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":171,"y":281}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":161,"y":274}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":156,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":147,"y":263}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":137,"y":257}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":129,"y":252}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":123,"y":246}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":117,"y":241}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":111,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":107,"y":232}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":103,"y":229}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":102,"y":229}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":100,"y":228}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":98,"y":227}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":96,"y":228}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":95,"y":228}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":92,"y":231}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":89,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":86,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":82,"y":240}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":76,"y":246}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":69,"y":254}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":63,"y":262}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":57,"y":271}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":52,"y":280}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":46,"y":292}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":46,"y":297}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":46,"y":298}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":46,"y":299}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":46,"y":300}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":47,"y":301}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":48,"y":301}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":49,"y":302}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":50,"y":302}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":50,"y":304}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":51,"y":305}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":51,"y":306}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":52,"y":308}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":55,"y":311}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":57,"y":312}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":60,"y":314}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":67,"y":318}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":71,"y":319}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":72,"y":320}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":76,"y":321}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":80,"y":321}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":91,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":97,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":110,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":115,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":119,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":124,"y":319}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":125,"y":318}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":126,"y":313}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":127,"y":310}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":128,"y":303}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":128,"y":298}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":128,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":128,"y":290}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":128,"y":278}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":127,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":125,"y":260}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":121,"y":252}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":117,"y":243}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":113,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":108,"y":219}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":108,"y":214}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":107,"y":209}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":104,"y":208}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":104,"y":205}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":106,"y":200}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":108,"y":196}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":110,"y":191}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":113,"y":180}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":115,"y":173}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":118,"y":167}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":123,"y":160}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":127,"y":154}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":133,"y":143}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":135,"y":137}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":139,"y":130}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":144,"y":124}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":148,"y":120}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":149,"y":120}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":151,"y":118}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":153,"y":117}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":154,"y":117}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":155,"y":116}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":156,"y":116}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":157,"y":116}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":158,"y":116}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":159,"y":116}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":165,"y":118}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":175,"y":121}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":185,"y":128}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":194,"y":135}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":149}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":220,"y":156}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":226,"y":163}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":230,"y":170}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":184}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":190}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":194}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":200}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":206}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":232,"y":214}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":228,"y":225}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":225,"y":232}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":225,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":223,"y":240}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":221,"y":245}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":219,"y":250}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":216,"y":255}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":264}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":211,"y":270}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":275}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":281}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":289}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":300}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":211,"y":306}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":310}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":314}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":317}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":217,"y":318}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":218,"y":320}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":220,"y":321}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":223,"y":323}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":225,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":229,"y":326}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":232,"y":328}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":239,"y":330}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":243,"y":331}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":247,"y":332}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":251,"y":332}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":257,"y":333}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":265,"y":335}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":269,"y":335}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":284,"y":336}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":293,"y":336}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":300,"y":336}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":307,"y":336}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":314,"y":336}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":323,"y":335}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":336,"y":330}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":342,"y":326}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":347,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":351,"y":318}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":352,"y":312}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":306}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":358,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":360,"y":288}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":362,"y":281}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":364,"y":273}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":365,"y":268}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":365,"y":263}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":365,"y":258}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":364,"y":249}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":362,"y":245}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":360,"y":242}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":360,"y":239}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":356,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":353,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":350,"y":232}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":348,"y":231}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":345,"y":231}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":342,"y":230}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":336,"y":230}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":333,"y":230}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":330,"y":230}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":324,"y":231}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":323,"y":232}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":322,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":237}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":244}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":248}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":251}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":253}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":255}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":323,"y":260}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":323,"y":262}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":324,"y":264}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":325,"y":266}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":326,"y":267}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":326,"y":268}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":327,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":328,"y":270}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":329,"y":271}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":329,"y":272}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":330,"y":274}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":331,"y":275}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":332,"y":277}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":333,"y":279}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":333,"y":280}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":335,"y":282}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":338,"y":287}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":340,"y":289}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":341,"y":290}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":342,"y":291}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":343,"y":292}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":345,"y":293}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":346,"y":293}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":348,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":349,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":350,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":350,"y":295}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":351,"y":296}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":352,"y":297}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":353,"y":300}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":356,"y":303}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":361,"y":309}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":366,"y":316}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":370,"y":323}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":375,"y":329}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":380,"y":337}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":341}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":342}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":343}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":344}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":345}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":346}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":380,"y":347}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":378,"y":349}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":378,"y":350}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":377,"y":350}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"fin","points":[
+				{"x":377,"y":350}
+			]}}
+		];
+
+		//雰囲気を出すためにタイムラグをつけて描画する
+		var i = 0;
+		var freeDraw = function() {
+			setTimeout(function() {
+				if (i >= receivedData.length) {
+					return;
+				}
+				$('#canvas').wbShareDrawShape(receivedData[i].uid, receivedData[i].command, receivedData[i].options)
+				i++;
+
+				freeDraw();
+			}, 10);
+		}
+		freeDraw();
+
+	});
+	$('#rectDataBtn').click(function(e) {
+		var receivedData = {"uid": "bar", "command":"draw","options":{"mode":"rect","color":"#f00ff0","lineWidth":"5","points":[
+			{"x":221,"y":148},
+			{"x":404,"y":439}
+		]}}
+
+		//他の作業中にも描画可能かどうかを調べるためにちょっと動作を遅らせる
+		setTimeout(function() {
+			$('#canvas').wbShareDrawShape(receivedData.uid, receivedData.command, receivedData.options)
+		}, 1000);
+	});
+	$('#circleDataBtn').click(function(e) {
+		var receivedData = {"uid": "bar", "command":"draw","options":{"mode":"circle","color":"#f00777","lineWidth":"9","points":[
+			{"x":247,"y":45},
+			{"x":361,"y":159}
+		]}}
+
+		//他の作業中にも描画可能かどうかを調べるためにちょっと動作を遅らせる
+		setTimeout(function() {
+			$('#canvas').wbShareDrawShape(receivedData.uid, receivedData.command, receivedData.options)
+		}, 1000);
+	});
+
+	$('#textDataBtn').click(function(e) {
+		var receivedData = {"uid":"hoge","command":"draw","options":{"mode":"text","color":"#000000","font":"22px Arial","text":"hogeほげ","strokeState":"fin","points":[
+			{"x":238,"y":128}
+		]}};
+
+		//他の作業中にも描画可能かどうかを調べるためにちょっと動作を遅らせる
+		setTimeout(function() {
+			$('#canvas').wbShareDrawShape(receivedData.uid, receivedData.command, receivedData.options)
+		}, 1000);
+	});
+
+	$('#clearBarBtn').click(function(e) {
+		var receivedData = {"uid": "bar", "command":"clear","options":{}}
+
+		//他の作業中にも描画可能かどうかを調べるためにちょっと動作を遅らせる
+		setTimeout(function() {
+			$('#canvas').wbShareDrawShape(receivedData.uid, receivedData.command, receivedData.options)
+		}, 1000);
+	});
+	$('#fillChk').click(function(e) {
+		fillFlg = this.val();
+	});
+
+//////////////////////////////////////////////////////////////////////////////////////////
+	$('#canvas2').wbShare('hoge2');
+
+//描画モードの変更
+	$('#lineBtn2').click(function(e) {
+		$('#canvas2').wbShareSetMode('line');
+	});
+	$('#freeBtn2').click(function(e) {
+		$('#canvas2').wbShareSetMode('free');
+	});
+	$('#rectBtn2').click(function(e) {
+		$('#canvas2').wbShareSetMode('rect');
+	});
+	$('#circleBtn2').click(function(e) {
+		$('#canvas2').wbShareSetMode('circle');
+	});
+	$('#textBtn2').click(function(e) {
+		$('#canvas2').wbShareSetMode('text');
+		$('#canvas2').wbShareSetText($('#inputTxt2').val());
+	});
+
+	$('#imgBtn2').click(function(e) {
+		$('#canvas2').wbShareSetMode('img');
+		$('#canvas2').wbShareSetImg($('#pasteImg2').attr('src'));
+	});
+	$('#lineWidthBtn2').click(function(e) {
+		$('#canvas2').wbShareSetLineWidth($('#lineWidthTxt2').val());
+	});
+	$('#colorBtn2').click(function(e) {
+		$('#canvas2').wbShareSetColor($('#colorTxt2').val());
+	});
+
+	$('#lineDataBtn2').click(function(e) {
+		//適当にデータ生成して投入する
+		var receivedData = {"uid": "foo", "command":"draw","options":{"mode":"line","color":"#ff0ff0","lineWidth":"10","points":[
+			{"x":410,"y":32},
+			{"x":455,"y":128},
+			{"x":329,"y":47},
+			{"x":329,"y":46}
+		]}}
+
+		//他の作業中にも描画可能かどうかを調べるためにちょっと動作を遅らせる
+		setTimeout(function() {
+			$('#canvas2').wbShareDrawShape(receivedData.uid, receivedData.command, receivedData.options)
+		}, 1000);
+	});
+
+	$('#freeDataBtn2').click(function(e) {
+		//適当にデータ生成して投入する
+		var receivedData = [
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"start","points":[
+				{"x":357,"y":53}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":357,"y":54}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":357,"y":55}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":357,"y":56}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":59}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":353,"y":61}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":349,"y":65}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":345,"y":70}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":343,"y":73}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":342,"y":75}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":339,"y":78}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":332,"y":88}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":328,"y":94}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":325,"y":105}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":327,"y":118}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":329,"y":124}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":330,"y":130}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":332,"y":136}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":333,"y":142}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":336,"y":149}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":337,"y":157}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":339,"y":161}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":341,"y":165}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":343,"y":170}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":345,"y":177}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":347,"y":183}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":349,"y":187}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":350,"y":191}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":352,"y":195}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":354,"y":200}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":210}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":213}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":216}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":354,"y":219}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":353,"y":221}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":351,"y":224}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":349,"y":228}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":346,"y":231}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":342,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":337,"y":240}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":332,"y":245}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":325,"y":249}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":317,"y":253}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":310,"y":257}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":301,"y":260}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":281,"y":267}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":271,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":260,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":245,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":239,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":226,"y":267}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":222,"y":265}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":219,"y":263}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":218,"y":261}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":216,"y":258}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":255}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":213,"y":252}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":248}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":210,"y":244}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":208,"y":239}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":206,"y":232}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":203,"y":224}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":201,"y":216}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":199,"y":207}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":197,"y":203}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":197,"y":199}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":197,"y":193}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":197,"y":187}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":197,"y":181}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":200,"y":176}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":200,"y":170}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":201,"y":165}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":204,"y":161}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":204,"y":158}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":204,"y":156}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":205,"y":155}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":206,"y":154}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":207,"y":154}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":207,"y":155}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":207,"y":156}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":207,"y":157}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":159}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":160}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":211,"y":162}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":164}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":213,"y":166}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":213,"y":169}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":171}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":173}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":175}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":176}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":177}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":178}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":179}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":180}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":182}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":184}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":186}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":188}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":190}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":191}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":192}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":193}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":194}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":216,"y":197}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":216,"y":199}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":217,"y":202}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":219,"y":205}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":223,"y":212}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":225,"y":215}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":228,"y":219}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":229,"y":220}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":234,"y":224}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":240,"y":229}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":247,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":254,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":259,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":264,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":269,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":274,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":279,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":285,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":290,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":295,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":296,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":299,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":303,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":307,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":309,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":311,"y":237}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":311,"y":238}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":312,"y":240}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":243}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":246}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":250}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":253}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":258}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":265}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":313,"y":272}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":311,"y":279}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":311,"y":286}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":310,"y":290}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":310,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":308,"y":300}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":307,"y":305}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":304,"y":310}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":303,"y":314}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":300,"y":317}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":298,"y":320}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":296,"y":321}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":293,"y":323}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":291,"y":324}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":288,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":285,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":281,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":276,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":269,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":264,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":258,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":252,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":246,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":240,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":234,"y":323}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":229,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":226,"y":320}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":222,"y":318}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":217,"y":316}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":312}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":309}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":206,"y":307}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":202,"y":303}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":196,"y":297}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":189,"y":292}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":181,"y":287}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":171,"y":281}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":161,"y":274}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":156,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":147,"y":263}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":137,"y":257}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":129,"y":252}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":123,"y":246}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":117,"y":241}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":111,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":107,"y":232}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":103,"y":229}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":102,"y":229}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":100,"y":228}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":98,"y":227}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":96,"y":228}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":95,"y":228}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":92,"y":231}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":89,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":86,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":82,"y":240}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":76,"y":246}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":69,"y":254}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":63,"y":262}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":57,"y":271}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":52,"y":280}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":46,"y":292}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":46,"y":297}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":46,"y":298}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":46,"y":299}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":46,"y":300}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":47,"y":301}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":48,"y":301}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":49,"y":302}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":50,"y":302}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":50,"y":304}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":51,"y":305}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":51,"y":306}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":52,"y":308}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":55,"y":311}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":57,"y":312}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":60,"y":314}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":67,"y":318}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":71,"y":319}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":72,"y":320}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":76,"y":321}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":80,"y":321}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":91,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":97,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":110,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":115,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":119,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":124,"y":319}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":125,"y":318}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":126,"y":313}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":127,"y":310}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":128,"y":303}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":128,"y":298}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":128,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":128,"y":290}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":128,"y":278}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":127,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":125,"y":260}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":121,"y":252}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":117,"y":243}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":113,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":108,"y":219}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":108,"y":214}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":107,"y":209}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":104,"y":208}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":104,"y":205}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":106,"y":200}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":108,"y":196}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":110,"y":191}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":113,"y":180}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":115,"y":173}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":118,"y":167}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":123,"y":160}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":127,"y":154}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":133,"y":143}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":135,"y":137}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":139,"y":130}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":144,"y":124}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":148,"y":120}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":149,"y":120}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":151,"y":118}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":153,"y":117}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":154,"y":117}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":155,"y":116}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":156,"y":116}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":157,"y":116}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":158,"y":116}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":159,"y":116}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":165,"y":118}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":175,"y":121}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":185,"y":128}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":194,"y":135}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":149}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":220,"y":156}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":226,"y":163}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":230,"y":170}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":184}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":190}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":194}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":200}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":233,"y":206}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":232,"y":214}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":228,"y":225}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":225,"y":232}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":225,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":223,"y":240}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":221,"y":245}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":219,"y":250}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":216,"y":255}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":264}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":211,"y":270}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":275}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":281}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":289}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":209,"y":300}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":211,"y":306}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":212,"y":310}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":214,"y":314}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":215,"y":317}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":217,"y":318}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":218,"y":320}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":220,"y":321}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":223,"y":323}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":225,"y":325}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":229,"y":326}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":232,"y":328}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":239,"y":330}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":243,"y":331}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":247,"y":332}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":251,"y":332}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":257,"y":333}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":265,"y":335}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":269,"y":335}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":284,"y":336}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":293,"y":336}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":300,"y":336}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":307,"y":336}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":314,"y":336}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":323,"y":335}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":336,"y":330}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":342,"y":326}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":347,"y":322}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":351,"y":318}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":352,"y":312}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":306}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":358,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":360,"y":288}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":362,"y":281}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":364,"y":273}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":365,"y":268}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":365,"y":263}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":365,"y":258}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":364,"y":249}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":362,"y":245}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":360,"y":242}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":360,"y":239}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":356,"y":236}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":355,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":353,"y":233}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":350,"y":232}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":348,"y":231}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":345,"y":231}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":342,"y":230}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":336,"y":230}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":333,"y":230}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":330,"y":230}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":324,"y":231}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":323,"y":232}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":322,"y":235}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":237}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":244}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":248}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":251}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":253}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":321,"y":255}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":323,"y":260}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":323,"y":262}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":324,"y":264}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":325,"y":266}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":326,"y":267}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":326,"y":268}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":327,"y":269}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":328,"y":270}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":329,"y":271}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":329,"y":272}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":330,"y":274}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":331,"y":275}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":332,"y":277}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":333,"y":279}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":333,"y":280}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":335,"y":282}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":338,"y":287}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":340,"y":289}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":341,"y":290}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":342,"y":291}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":343,"y":292}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":345,"y":293}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":346,"y":293}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":348,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":349,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":350,"y":294}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":350,"y":295}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":351,"y":296}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":352,"y":297}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":353,"y":300}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":356,"y":303}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":361,"y":309}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":366,"y":316}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":370,"y":323}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":375,"y":329}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":380,"y":337}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":341}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":342}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":343}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":344}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":345}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":381,"y":346}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":380,"y":347}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":378,"y":349}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":378,"y":350}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"drawing","points":[
+				{"x":377,"y":350}
+			]}},
+			{"uid":"foo","command":"draw","options":{"mode":"free","color":"#0FF000","lineWidth":"4","strokeState":"fin","points":[
+				{"x":377,"y":350}
+			]}}
+		];
+
+		//雰囲気を出すためにタイムラグをつけて描画する
+		var i = 0;
+		var freeDraw = function() {
+			setTimeout(function() {
+				if (i >= receivedData.length) {
+					return;
+				}
+				$('#canvas2').wbShareDrawShape(receivedData[i].uid, receivedData[i].command, receivedData[i].options)
+				i++;
+
+				freeDraw();
+			}, 10);
+		}
+		freeDraw();
+
+	});
+	$('#rectDataBtn2').click(function(e) {
+		var receivedData = {"uid": "bar", "command":"draw","options":{"mode":"rect","color":"#f00ff0","lineWidth":"5","points":[
+			{"x":221,"y":148},
+			{"x":404,"y":439}
+		]}}
+
+		//他の作業中にも描画可能かどうかを調べるためにちょっと動作を遅らせる
+		setTimeout(function() {
+			$('#canvas2').wbShareDrawShape(receivedData.uid, receivedData.command, receivedData.options)
+		}, 1000);
+	});
+	$('#circleDataBtn2').click(function(e) {
+		var receivedData = {"uid": "bar", "command":"draw","options":{"mode":"circle","color":"#f00777","lineWidth":"9","points":[
+			{"x":247,"y":45},
+			{"x":361,"y":159}
+		]}}
+
+		//他の作業中にも描画可能かどうかを調べるためにちょっと動作を遅らせる
+		setTimeout(function() {
+			$('#canvas2').wbShareDrawShape(receivedData.uid, receivedData.command, receivedData.options)
+		}, 1000);
+	});
+
+	$('#textDataBtn2').click(function(e) {
+		var receivedData = {"uid":"hoge","command":"draw","options":{"mode":"text","color":"#000000","font":"22px Arial","text":"hogeほげ","strokeState":"fin","points":[
+			{"x":238,"y":128}
+		]}};
+
+		//他の作業中にも描画可能かどうかを調べるためにちょっと動作を遅らせる
+		setTimeout(function() {
+			$('#canvas2').wbShareDrawShape(receivedData.uid, receivedData.command, receivedData.options)
+		}, 1000);
+	});
+
+	$('#clearBarBtn2').click(function(e) {
+		var receivedData = {"uid": "bar", "command":"clear","options":{}}
+
+		//他の作業中にも描画可能かどうかを調べるためにちょっと動作を遅らせる
+		setTimeout(function() {
+			$('#canvas2').wbShareDrawShape(receivedData.uid, receivedData.command, receivedData.options)
+		}, 1000);
+	});
+	$('#fillChk2').click(function(e) {
+		fillFlg = this.val();
+	});
+
+});

@@ -170,7 +170,7 @@ $(function() {
 						return new Bitmap(status.img);
 					} else {
 						if (baseProcType[status.mode] === 'free') {
-							send({
+							canvas.wbShareSendCommand({
 								uid: uid,
 								command: 'draw',
 								options: {
@@ -200,7 +200,7 @@ $(function() {
 					var status = canvas.data('wbShareStatus');
 					if (baseProcType[status.mode] === 'free') {//フリーハンドの場合
 						//サーバに描画データを送信する
-						send({
+						canvas.wbShareSendCommand({
 							uid: uid,
 							command: 'draw',
 							options: {
@@ -271,7 +271,7 @@ $(function() {
 						shape.graphics.endStroke();
 
 						//サーバに描画データを送信する
-						send({
+						canvas.wbShareSendCommand({
 							uid: uid,
 							command: 'draw',
 							options: {
@@ -397,15 +397,6 @@ $(function() {
 						stage.update();
 					}
 				};
-
-
-				//データ送信関数（一般）
-				var send = function(command, options) {
-					//ユーザが設定した関数呼び出し．
-					//ここにはデータ送信用の関数を設定していただく
-					var status = canvas.data('wbShareStatus');
-					status.sendFunc(command, options);
-				}
 			});
 
 			return this;
@@ -470,23 +461,19 @@ $(function() {
 			canvas.data('wbShareStatus', status);
 			return canvas;
 		},
-		wbShareClear: function() {
+		wbShareSendCommand: function(command, options) {
 			var canvas = this;
-			$.each(shapes, function(i, eachUidShapes) {
-				var clearShapes = eachUidShapes;
-				if (clearShapes) {
-					for (var i in clearShapes) {
-						stage.removeChild(clearShapes[i]);
-					}
-					shapes[uid] = [];	//画面から削除したので参照もクリアする
-					stage.update();
-				}
-			});
-			send({
-				uid: undefined,
-				command: 'clear',
-				options: undefined
-			});
+			//ユーザが設定した関数呼び出し．
+			//ここにはデータ送信用の関数を設定していただく
+			var status = canvas.data('wbShareStatus');
+			status.sendFunc(command, options);
+			return canvas;
+		},
+		wbShareClear: function(uid) {
+			var canvas = this;
+			//受信しだデータを処理する関数を利用する
+			canvas.wbShareDrawShape(uid, 'clear', {});
+			canvas.wbShareSendCommand('clear', {});
 			return canvas;
 		},
 		/**
@@ -605,16 +592,16 @@ $(function() {
 				graphics.drawCircle(pts[0].x, pts[0].y, r);
 			}
 		},
-		wbShareSendClear: function() {
-			//TODO
+//		wbShareSendClear: function() {
+//			//TODO
 //			var canvas = this;
 //			send({
 //				uid: uid,
 //				command: 'clear',
 //				options: undefined
 //			});
-			return canvas;
-		},
+//			return canvas;
+//		},
 		wbShareGetStageObj: function() {
 			return this.data('wbShareStatus').stage;
 		}
