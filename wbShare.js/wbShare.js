@@ -80,7 +80,7 @@ $(function() {
 				//border-widthが太く設定されていると，それによってCanvasの描画する部分がずれてしまうので，その分を足す．
 				offset.left += parseInt(canvas.css('borderLeftWidth'));
 				offset.top += parseInt(canvas.css('borderTopWidth'));
-				
+
 				//クリックされた座標を取得する関数．高速化のためtouchイベントの有無は最初の一回のみ
 				//判断し，その際にgetCanvasCoor自身を，touchイベントの有無判断の無い形に書き換える．
 				var getCanvasCoor = function(e) {
@@ -134,8 +134,8 @@ $(function() {
 					//後処理
 					afterDrawStartProc(e, coor);
 				};
-				canvas.on('touchstart', canvas, drawStartEvent);
-				canvas.on('mousedown', canvas, drawStartEvent);
+				canvas.bind('touchstart', drawStartEvent);
+				canvas.bind('mousedown', drawStartEvent);
 
 				//書いている際のイベント
 				var drawingEvent = function(e) {
@@ -153,8 +153,8 @@ $(function() {
 						afterDrawingProc(e, coor);
 					}
 				};
-				canvas.on('touchmove', canvas, drawingEvent);
-				canvas.on('mousemove', canvas, drawingEvent);
+				canvas.bind('touchmove', drawingEvent);
+				canvas.bind('mousemove', drawingEvent);
 
 				//書き終わった際のイベント
 				var drawFinEvent = function(e) {
@@ -172,8 +172,8 @@ $(function() {
 						afterDrawFinProc(e, coor);
 					}
 				};
-				canvas.on('touchend', canvas, drawFinEvent);
-				canvas.on('mouseup', canvas, drawFinEvent);
+				canvas.bind('touchend', drawFinEvent);
+				canvas.bind('mouseup', drawFinEvent);
 
 				//マウス／タッチイベントの前処理・後処理////////////////////////
 				var beforeDrawStartProc = function(e, coor) {
@@ -282,7 +282,7 @@ $(function() {
 					var status = canvas.data('wbShareStatus');
 					status.shapes = shapes;
 					canvas.data('wbShareStatus', status);
-					
+
 					if (baseProcType[status.mode] === 'shape' || baseProcType[status.mode] === 'free') {
 						//文字列処理以外はここでストロークを終わらせる
 						shape.graphics.endStroke();
@@ -624,4 +624,3 @@ $(function() {
 		}
 	});
 });
-
