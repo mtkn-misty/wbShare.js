@@ -8,7 +8,8 @@ $(function() {
 		circle: 'shape',
 		free: 'free',	//フリーハンド 描画時は常に座標データを送る
 		text: 'text',	//文字列 描画終了と共に一回だけデータを送る
-		img: 'img'	//画像 描画終了と共に一回だけデータを送る
+		img: 'img',	//画像 描画終了と共に一回だけデータを送る
+		sel: 'sel'	//図形を選択して操作する
 	};
 
 	$.fn.extend({
@@ -17,7 +18,7 @@ $(function() {
 		 */
 		wbShare: function(userId) {
 			this.filter('canvas').each(function() {
-				//Canvasの１インスタンスを通しての状態変数/////////////////////
+				//wbShareの１インスタンスを通しての状態変数/////////////////////
 				var uid = userId;
 				var canvas = $(this);
 
@@ -27,6 +28,7 @@ $(function() {
 
 				var shape; //今現在描画しているオブジェクト
 				var receivedShapes = [];	//他者から今まさに受信しているオブジェクト．他者のuid属性で名前空間を切ってそこに値を入れる
+
 
 				var stPoint = { //今描いている図形の始点
 					x: 0,
@@ -39,6 +41,7 @@ $(function() {
 				};
 
 				//ワーク用のIMG要素作成
+				//TODO bodyに追加する必要がないので，new Imageで生成して参照をJavaScriptで保持するようにする
 				var workImgId = '__wbShareWork__' + (new Date().getTime());
 				setTimeout(function() {
 					$('body').append(
@@ -69,34 +72,48 @@ $(function() {
 				//TODO: 塗り潰しは未実装
 
 				//Util ipad - PCのイベント差吸収系/////////////
-				//iPadは検証環境がないので検証していない・・注意（高野）
+				//TODO iPadは検証環境がないので検証していない・・注意（高野）
 
 				//キャンバスの場所をキャッシュする（高速化のため．ただしCanvasの場所をあとから変えたいときはこの値を更新する必要がある）
+
 				var offset = canvas.offset();
+				//border-widthが太く設定されていると，それによってCanvasの描画する部分がずれてしまうので，その分を足す．
+				offset.left += parseInt(canvas.css('borderLeftWidth'));
+				offset.top += parseInt(canvas.css('borderTopWidth'));
+				
+				//クリックされた座標を取得する関数．高速化のためtouchイベントの有無は最初の一回のみ
+				//判断し，その際にgetCanvasCoor自身を，touchイベントの有無判断の無い形に書き換える．
 				var getCanvasCoor = function(e) {
 					//jQuery's event object unsupports touche events, so we use the object of "window.event"
 					if (event.touches) {//タッチ系のイベントが存在する場合
-						var touches = event.touches[0];
-						if (touches) {
-							var coor = {
-								x: touches.pageX - offset.left,
-								y: touches.pageY - offset.top
-							};
-							beforeCoor = coor;	//直前に返した座標を覚えておく．以下のelse文以降のため
-							return coor;
-						} else {
-							//タッチ系のイベントだが，値が取れないとき（touchendなど）は直前に返した値を返す
-							return beforeCoor;
-						}
+						var func = function(e) {
+							var touches = event.touches[0];
+							if (touches) {
+								var coor = {
+									x: touches.pageX - offset.left,
+									y: touches.pageY - offset.top
+								};
+								beforeCoor = coor;	//直前に返した座標を覚えておく．以下のelse文以降のため
+								return coor;
+							} else {
+								//タッチ系のイベントだが，値が取れないとき（touchendなど）は直前に返した値を返す
+								return beforeCoor;
+							}
+						};
+						getCanvasCoor = func;
+						return func(e);
 					}
 					else { //iPad以外の場合
-						return {
-							x: e.pageX - offset.left,
-							y: e.pageY - offset.top
+						var func = function(e) {
+							return {
+								x: e.pageX - offset.left,
+								y: e.pageY - offset.top
+							};
 						};
+						getCanvasCoor = func;
+						return func(e);
 					}
 				};
-
 
 				//コントローラ/////////////
 				//描画イベント//
@@ -285,7 +302,7 @@ $(function() {
 					}
 					else if (baseProcType[status.mode] === 'text') {
 						//サーバに描画データを送信する
-						send({
+						canvas.wbShareSendCommand({
 							uid: uid,
 							command: 'draw',
 							options: {
@@ -299,7 +316,7 @@ $(function() {
 					}
 					else if (baseProcType[status.mode] === 'img') {
 						//サーバに描画データを送信する
-						send({
+						canvas.wbShareSendCommand({
 							uid: uid,
 							command: 'draw',
 							options: {
