@@ -134,8 +134,8 @@ $(function() {
 					//後処理
 					afterDrawStartProc(e, coor);
 				};
-				canvas.bind('touchstart', drawStartEvent);
-				canvas.bind('mousedown', drawStartEvent);
+				canvas.on('touchstart', canvas, drawStartEvent);
+				canvas.on('mousedown', canvas, drawStartEvent);
 
 				//書いている際のイベント
 				var drawingEvent = function(e) {
@@ -153,8 +153,8 @@ $(function() {
 						afterDrawingProc(e, coor);
 					}
 				};
-				canvas.bind('touchmove', drawingEvent);
-				canvas.bind('mousemove', drawingEvent);
+				canvas.on('touchmove', canvas, drawingEvent);
+				canvas.on('mousemove', canvas, drawingEvent);
 
 				//書き終わった際のイベント
 				var drawFinEvent = function(e) {
@@ -172,8 +172,8 @@ $(function() {
 						afterDrawFinProc(e, coor);
 					}
 				};
-				canvas.bind('touchend', drawFinEvent);
-				canvas.bind('mouseup', drawFinEvent);
+				canvas.on('touchend', canvas, drawFinEvent);
+				canvas.on('mouseup', canvas, drawFinEvent);
 
 				//マウス／タッチイベントの前処理・後処理////////////////////////
 				var beforeDrawStartProc = function(e, coor) {
