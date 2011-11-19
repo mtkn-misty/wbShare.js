@@ -611,7 +611,7 @@ $(function() {
 		},
 //		wbShareSendClear: function() {
 //			//TODO
-//			var canvas = this;
+//			var canvas= this;
 //			send({
 //				uid: uid,
 //				command: 'clear',

@@ -7,13 +7,14 @@
  */
 $(function() {
 	$('#canvas').wbShare('hoge').wbShareSetSendFunction(function(command, options) {
-		console.log(JSON.stringify(command, options))
+//		console.log(JSON.stringify(command, options))
 //		//TODO: あとで消す
 //		$('#drawDataDiv').html(
 //			$('#drawDataDiv').html() +
 //				JSON.stringify(command, options) + '<br/>'
 //		);
-	});
+//	});
+	
 //描画モードの変更
 	$('#select-line-width').change(function(e){
 		var width = $(this).val();

@@ -1,7 +1,7 @@
 $(function() {
 
 	//共通的な関数//////////////
-	var initializeBase = function(derive, base, baseArg) {
+	var initializeBase = function(derive, base, baseArgs) {
 		base.apply(derive, baseArgs);
 		for (var prop in base.prototype) {
 			var proto = derive.constructor.prototype;
@@ -27,18 +27,14 @@ $(function() {
 
 	//抽象クラス
 	var Logic = function(stg) {
+		var uid = null;
 		var target = {};	//描画・操作対象のオブジェクト
 		var targets = [];
 
 		var stPoint = {};	//描画の始点
 		var stage = stg;	//EaselJSのstage
 
-		var color = null;
-		var text = null;
-		var lineWidth = null;
-		var font = null;
-		var img = null;
-
+		
 		return this;
 	};
 	Logic.prototype = {
@@ -53,6 +49,14 @@ $(function() {
 	var DrawLogic = function(stage) {
 		//継承する
 		initializeBase(this, Logic, [stage]);
+		
+		var color = null;
+		var text = null;
+		var lineWidth = null;
+		var font = null;
+		var img = null;
+
+		var wbShareSendCommand;
 
 		var drawStartCommands = {
 			line: function(shape, coor) {
@@ -142,8 +146,8 @@ $(function() {
 
 				this.target = new Shape();
 				if (baseProcType[mode] === 'free') {
-					canvas.wbShareSendCommand({
-						uid: uid,
+					this.wbShareSendCommand({
+						uid: this.uid,
 						command: 'draw',
 						options: {
 							mode: mode,
@@ -169,8 +173,8 @@ $(function() {
 		var beforeDrawingProc = function(mode, coor) {
 			if (baseProcType[mode] === 'free') {//フリーハンドの場合
 				//サーバに描画データを送信する
-				canvas.wbShareSendCommand({
-					uid: uid,
+				this.wbShareSendCommand({
+					uid: this.uid,
 					command: 'draw',
 					options: {
 						mode: mode,
@@ -225,8 +229,8 @@ $(function() {
 				this.target.graphics.endStroke();
 
 				//サーバに描画データを送信する
-				canvas.wbShareSendCommand({
-					uid: uid,
+				this.wbShareSendCommand({
+					uid: this.uid,
 					command: 'draw',
 					options: {
 						mode: mode,
@@ -240,7 +244,7 @@ $(function() {
 			else if (baseProcType[mode] === 'text') {
 				//サーバに描画データを送信する
 				canvas.wbShareSendCommand({
-					uid: uid,
+					uid: this.uid,
 					command: 'draw',
 					options: {
 						mode: mode,
@@ -254,7 +258,7 @@ $(function() {
 			else if (baseProcType[mode] === 'img') {
 				//サーバに描画データを送信する
 				canvas.wbShareSendCommand({
-					uid: uid,
+					uid: this.uid,
 					command: 'draw',
 					options: {
 						mode: mode,
@@ -303,6 +307,15 @@ $(function() {
 			afterDrawFinProc(mode, coor);
 		};
 
+		this.setParameters = function(params) {
+			for(var i in params) {
+				this[i] = params[i];
+			}
+		};
+
+		this.wbShareSendCommand = function(command, option) {
+			
+		};
 		return this;
 	};
 
@@ -319,10 +332,8 @@ $(function() {
 				var canvas = $(this);
 
 				var stage = new Stage(canvas[0]);
-				var shapes = []; //shapeを作成した順に格納しておく物　uidゴトに分けて図形オブジェクトへの参照を持っておく
-				shapes[uid] = [];
 
-				var shape; //今現在描画しているオブジェクト
+				var mode = 'free';
 				var receivedShapes = [];	//他者から今まさに受信しているオブジェクト．他者のuid属性で名前空間を切ってそこに値を入れる
 
 				var stPoint = { //今描いている図形の始点
@@ -337,6 +348,15 @@ $(function() {
 
 				//ロジックの宣言
 				var drawLogic = new DrawLogic(stage);
+				drawLogic.setParameters({
+					uid: uid,
+					color: '#000000',
+					text: 'hoge',
+					lineWidth: '3px',
+					font: '22px Arial',
+					img: null
+				});
+
 				var selectLogic;	//TODO: あとで作る
 
 				var logic = drawLogic;	//	defaultは描画モード
@@ -393,32 +413,40 @@ $(function() {
 					e.preventDefault();
 
 					//コマンド実行
-					logic.start(mode, coor);
+					logic.start(mode, getCanvasCoor(e));
 
 				};
-				canvas.on('touchstart', canvas, drawStartEvent);
-				canvas.on('mousedown', canvas, drawStartEvent);
+				canvas.on('touchstart', canvas, startEvent);
+				canvas.on('mousedown', canvas, startEvent);
 
 				//書いている際のイベント
-				var drawingEvent = function(e) {
+				var moveEvent = function(e) {
 					e.preventDefault();
 					//コマンド実行
-					logic.move(mode, coor);
+					logic.move(mode, getCanvasCoor(e));
 
 				};
-				canvas.on('touchmove', canvas, drawingEvent);
-				canvas.on('mousemove', canvas, drawingEvent);
+				canvas.on('touchmove', canvas, moveEvent);
+				canvas.on('mousemove', canvas, moveEvent);
 
 				//書き終わった際のイベント
-				var drawFinEvent = function(e) {
+				var finEvent = function(e) {
 					e.preventDefault();
 
 					//コマンド実行
-					logic.fin(mode, coor);
+					logic.fin(mode, getCanvasCoor(e));
 				};
-				canvas.on('touchend', canvas, drawFinEvent);
-				canvas.on('mouseup', canvas, drawFinEvent);
+				canvas.on('touchend', canvas, finEvent);
+				canvas.on('mouseup', canvas, finEvent);
 			});
+		},
+		wbShareSendDrawCommand: function(command, options) {
+			var canvas = this;
+			//ユーザが設定した関数呼び出し．
+			//ここにはデータ送信用の関数を設定していただく
+			var logics = canvas.data('wbShareLogics');
+			logics.drawLogic.(command, options);
+			return canvas;
 		}
 	});
 });
