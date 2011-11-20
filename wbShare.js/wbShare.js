@@ -1,4 +1,4 @@
-$(function() {
+(function($) {
 	//定数///////////////////
 	//前処理・後処理のタイプとドローモードの対応付け．
 	//modeにしたがって，前後処理のタイプを分ける
@@ -623,4 +623,4 @@ $(function() {
 			return this.data('wbShareStatus').stage;
 		}
 	});
-});
+})(jQuery);
