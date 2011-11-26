@@ -360,7 +360,7 @@
 
 				var drawingCommands = {
 					line: function(graphics, coor) {
-						graphics.moveTo(stPoint.x, stPoint.y).lineTo(coor.x, coor.y);
+						graphics.moveTo(stPoint.x, stPoint.y).lineTo(coor.x, coor.y);Z
 					},
 					free: function(graphics, coor) {
 						graphics.lineTo(coor.x, coor.y);
@@ -515,7 +515,7 @@
 
 					receivedGraphics.setStrokeStyle(options.lineWidth)//描画スタイル（線の幅）の設定
 						.beginStroke(options.color);//書き込み1単位 開始
-					canvas.wbShareDrawOneStroke[options.mode](receivedGraphics, options);
+					drawOneStroke[options.mode](receivedGraphics, options);
 
 					stage.update();
 					receivedGraphics.endStroke();
