@@ -1,17 +1,4 @@
 (function($) {
-    var LOGICS = 'wbShareLogics';
-
-    //共通的な関数//////////////
-    var initializeBase = function(derive, base, baseArgs) {
-        base.apply(derive, baseArgs);
-        for (var prop in base.prototype) {
-            var proto = derive.constructor.prototype;
-            if (!proto[prop]) {
-                proto[prop] = base.prototype[prop];
-            }
-        }
-    }
-
     //定数///////////////////
     //前処理・後処理のタイプとドローモードの対応付け．
     //modeにしたがって，前後処理のタイプを分ける
@@ -24,7 +11,17 @@
         img: 'img'    //画像 描画終了と共に一回だけデータを送る
     };
 
+    //$.fn.dataにロジックを共有するためにロジックオブジェクトを格納しておくためのkey．
+    var LOGICS = 'wbShareLogics';
+
     //ロジック///////////////////////////////
+
+    /**
+     * 選択フェイズのロジック．
+     * 選択された図形を移動する，拡大縮小する，回転するなどの処理をする．
+     * @param id User ID
+     * @param stg EaselJS's stage
+     */
     var ShapeSelectLogic = function(id, stg) {
         var logic = this;   //関数オブジェクト中にDrawLogicを参照するための変数
 
@@ -32,6 +29,7 @@
         var stage = stg;
 
         //TODO デフォルト値を設定できるようにする
+        //パラメータ
         var params = {
             expansionButtonsColor: null,
             expansionButtonsSize: null,
@@ -42,8 +40,11 @@
             sendFunc: null
         }
 
-        var target = null;  //選択しているオブジェクト（図形・テキスト・画像）
-        var operationButton = null; //現在操作しているボタン
+        //選択しているオブジェクト（図形・テキスト・画像）
+        var target = null;
+
+        //現在操作しているボタン
+        var operationButton = null;
 
         //操作の種類（拡大縮小: expansion, 移動: move, 回転: turn）．ボタンのクリックイベントで設定する
         var operationType = null;
@@ -94,18 +95,27 @@
 
         };
 
+        /**
+         * 選択されている図形に対して操作ボタンに対応した動作を実行する(mousedown時)
+         */
         var shapeChangeStartCommands  = {
             expand: function(coor){},
             move: function(coor){},
             turn: function(coor){}
         };
 
+        /**
+         * 選択されている図形に対して操作ボタンに対応した動作を実行する(mousemove時)
+         */
         var shapeChangingCommands  = {
             expand: function(coor){},
             move: function(coor){},
             turn: function(coor){}
         };
 
+        /**
+         * 選択されている図形に対して操作ボタンに対応した動作を実行する(mouseup時)
+         */
         var shapeChangeFinishCommands = {
             expand: function(coor){},
             move: function(coor){},
@@ -113,6 +123,10 @@
         };
         
         //パブリック関数//////////////////////////
+        /**
+         * 図形がクリックされたときに，その図形を「選択」されたことにする処理
+         * @param trgt EaselJSのShape, Bitmap, Textオブジェクト
+         */
         this.select = function(trgt) {
             target = trgt;
 
@@ -123,6 +137,10 @@
             operationButton = null;
         };
 
+        /**
+         * Canvas上でmousedownイベント発生時の処理
+         * @param coor マウスの座標
+         */
         this.start = function(coor) {
             if(operationButton) {
                 //操作用のボタンが選択されているとき
@@ -130,6 +148,11 @@
             }
             //操作用のボタンが選択されていないときは何もしない
         };
+
+        /**
+         * Canvas上でmousemoveイベント発生時の処理
+         * @param coor マウスの座標
+         */
         this.move = function(coor) {
             if(operationButton) {
                 //操作用のボタンが選択されているとき
@@ -137,6 +160,11 @@
             }
             //操作用のボタンが選択されていないときは何もしない
         };
+
+        /**
+         * Canvas上でmouseupイベント発生時の処理
+         * @param coor マウスの座標
+         */
         this.finish = function(coor) {
             if(operationButton) {
                 //操作用のボタンが選択されているとき
@@ -145,23 +173,50 @@
             //操作用のボタンが選択されていないときは何もしない
         };
 
+        /**
+         * 本ロジックでの図形操作結果を送信する処理
+         * @param command
+         * @param optioins
+         */
         this.sendCommand = function(command, option) {
             params.sendFunc(command, option);
         };
 
+        /**
+         * パラメータを設定する
+         * @param prms
+         */
         this.setParameters = function(prms) {
             for (var i in prms) {
                 params[i] = prms[i];
             }
         };
 
+        /**
+         * 送信関数を設定する
+         * @param prms
+         */
         this.setSendFunc = function(func) {
             params.sendFunc = func;
         };
 
+        /**
+         * 受信したデータを画面に反映する
+         * @param uid
+         * @param sid
+         * @param command
+         * @param options
+         */
         this.receiveCommand = function(uid, sid, command, options) {
         };
     };
+
+    /**
+     * 描画フェイズのロジック．
+     * 選択された図形を移動する，拡大縮小する，回転するなどの処理をする．
+     * @param id User ID
+     * @param stg EaselJS's stage
+     */
     var DrawLogic = function(id, stg) {
         var logic = this;   //関数オブジェクト中にDrawLogicを参照するための変数
 
@@ -169,13 +224,16 @@
         var target = null; 
         var stage = stg;
 
-        var shapes = []; //shapeを作成した順に格納しておく物　uidゴトに分けて図形オブジェクトへの参照を持っておく
-        shapes[uid] = [];
-        var nowShapesId = '';    //今まさに描いている図形のID．受信側で描画するときに使用する．
-                                  // userIDと現在時刻を用いて作成する．
+        //今まさに描いている図形のID．受信側で描画するときに使用する．
+        // userIDと現在時刻を用いて作成する．
+        var nowShapesId = '';
+
+        //現在，データを受信して描画している図形
+        //複数同時に受け付けられるように配列にしている
         var receivingShapes = [];
 
         //TODO デフォルト値を設定できるようにする
+        //パラメータ
         var params = {
             color: null,
             text: null,
@@ -184,15 +242,20 @@
             img: null,
             sendFunc: null
         };
-        var targets = [];
-        targets[uid] = [];
+
         var stPoint = {};	//描画の始点
 
+        /**
+         * 図形ID生成関数
+         */
         var generateShapesId = function() {
             var id = uid + '_' + (new Date()).getTime();
             return id;
         };
 
+        /**
+         * 1ストローク分の描画処理をする
+         */
         var drawOneStroke =	{
             //フリーハンドの描画
 			free: function(graphics, options) {
@@ -221,7 +284,10 @@
 				graphics.drawCircle(pts[0].x, pts[0].y, r);
 			}
 		};
-        
+
+        /**
+         * mousedownイベント時の処理
+         */
         var drawStartCommands = {
             line: function(shape, coor) {
                 shape.graphics.moveTo(coor.x, coor.y);
@@ -243,6 +309,9 @@
             }
         };
 
+        /**
+         * mousemoveイベント時の処理
+         */
         var drawingCommands = {
             line: function(shape, coor) {
                 shape.graphics.moveTo(stPoint.x, stPoint.y).lineTo(coor.x, coor.y);
@@ -267,6 +336,9 @@
             }
         };
 
+        /**
+         * mouseupイベント時の処理
+         */
         var drawFinCommands = {
             line: function(shape, coor) {
                 shape.graphics.moveTo(stPoint.x, stPoint.y).lineTo(coor.x, coor.y);
@@ -391,11 +463,6 @@
         }
 
         var afterDrawFinProc = function(mode, coor) {
-
-            //自分の書いた図形を保存しておく
-            //TODO: これはLogicで管理するか微妙．要検討．
-            targets[uid].push(target);
-
             if (baseProcType[mode] === 'shape' || baseProcType[mode] === 'free') {
                 //図形・フリーハンドはここでストロークを終わらせる
                 target.graphics.endStroke();
@@ -448,6 +515,7 @@
             stage.update();
             target = null;
         }
+
         this.start = function(coor) {
             var mode = params.mode;
             //前処理
@@ -565,29 +633,7 @@
 					stage.update();
 				}
 
-				//uidゴトに分けて図形オブジェクトへの参照を持っておく
-				if (!shapes[uid]) {
-					shapes[uid] = [];
-				}
-				shapes[uid].push(receivingShape);
-
 			} else if (command === 'clear') {
-                //TODO クリア機能は例や実装後に実装する
-				var clearShapes = shapes;
-				if(uid) {
-					clearShapes = [];
-					clearShapes.push(shapes[uid]);
-				}
-//				$.each(clearShapes, function(i, eachUidShapes) {
-//
-//					if (eachUidShapes) {
-//						for (var i in eachUidShapes) {
-//							stage.removeChild(eachUidShapes[i]);
-//						}
-//						shapes[uid] = [];	//画面から削除したので参照もクリアする
-//						stage.update();
-//					}
-//				});
 
 			}
         };
