@@ -22,11 +22,16 @@
      * @param id User ID
      * @param stg EaselJS's stage
      */
-    var ShapeSelectLogic = function(id, stg) {
+    var SelectLogic = function(id, stg) {
         var logic = this;   //関数オブジェクト中にDrawLogicを参照するための変数
 
         var uid = id;
         var stage = stg;
+
+		//現在の図形に対する操作を表す．
+		//expansion, move, trun, null（なにもしていない）の4つの値を取る
+		var state = null;
+
 
         //TODO デフォルト値を設定できるようにする
         //パラメータ
@@ -38,7 +43,13 @@
             turnButtonsColor: null,
             turnButtonsSize: null,
             sendFunc: null
-        }
+        };
+
+		//図形に対するイベント
+		var eventFunc = {
+			click: null,
+			press: null
+		};
 
         //選択しているオブジェクト（図形・テキスト・画像）
         var target = null;
@@ -49,13 +60,13 @@
         //操作の種類（拡大縮小: expansion, 移動: move, 回転: turn）．ボタンのクリックイベントで設定する
         var operationType = null;
 
-        //図形のサイズを変更するためのボタン（8方向分）
+        //図形のサイズを変更するためのボタンの生成（8方向分）
         var sizeExpansionButtons = {
-            left: (function(){
+            left: function(){
                 var btn = new Shape();
 
                 return btn;
-            }()),
+            },
             right: (function(){
 
             }()),
@@ -79,21 +90,43 @@
             }())
         };
 
-        //図形移動用の枠
-        var shapeMoveFrame = (function(){}());
+        //図形移動用の枠の生成
+        var drawShapeMoveFrame = function(){
+			var frame = new Shape();
+			frame.alpha = 0.5;
 
-        //回転用のボタン
-        var shapeTurnButton = (function(){}());
+			var graphics = frame.graphics;
+			graphics.setStrokeStyle(params.moveFrameLineWidth, 1, 1)//描画スタイル（線の幅）の設定
+				.beginStroke(params.moveFrameColor);//書き込み1単位 開始
+			graphics.rect(target.stX, target.stY, target.width, target.height);
+			
+			graphics.endStroke();
+
+			frame.onPress = function(e) {
+				status = move;
+			};
+
+            return frame;
+		};
+
+        //回転用のボタンの生成
+        var shapeTurnButton = function(){
+
+		};
 
         //プライベート関数////////////////////////////
 
         /**
          * 選択されている図形（target）に対して操作(拡大縮小，回転，移動)用のオブジェクトを描画する．
-         * @param trgt
          */
         var drawOperationButtons = function() {
+//			$.each(sizeExpansionButtons, function(key, val){
+//				stage.addChild(key);
+//			});
 
-        };
+			stage.addChild(drawShapeMoveFrame());
+			stage.update();
+		};
 
         /**
          * 選択されている図形に対して操作ボタンに対応した動作を実行する(mousedown時)
@@ -125,17 +158,23 @@
         //パブリック関数//////////////////////////
         /**
          * 図形がクリックされたときに，その図形を「選択」されたことにする処理
-         * @param trgt EaselJSのShape, Bitmap, Textオブジェクト
+         * @param obj EaselJSのShape, Bitmap, Textオブジェクト
          */
-        this.select = function(trgt) {
-            target = trgt;
+        this.select = function(e, obj){
+			console.log('SELECT');
+			if(obj == target) {//ここは参照先を比較するので=は2つ
+				//クリックされたもの(obj)と現在選択されているもの(target)が同一であれば
+				//なにもしない？
 
-            //TODO 選択されると見た目を変える処理
-            
-            drawOperationButtons();
-            
-            operationButton = null;
-        };
+			} else {
+				//クリックされたもの(obj)と現在選択されているもの(target)が異なれば
+
+				//新たにobjが選択されたとする
+				target = obj;
+				drawOperationButtons();
+				operationButton = null;
+			}
+		};
 
         /**
          * Canvas上でmousedownイベント発生時の処理
@@ -243,6 +282,11 @@
             sendFunc: null
         };
 
+		var eventFuncs = {
+			press: null,
+			click: null
+		};
+
         var stPoint = {};	//描画の始点
 
         /**
@@ -290,10 +334,14 @@
          */
         var drawStartCommands = {
             line: function(shape, coor) {
-                shape.graphics.moveTo(coor.x, coor.y);
+                shape.graphics.moveTo(0, 0);
+				shape.x = coor.x;
+				shape.y = coor.y
             },
             free: function(shape, coor) {
-                shape.graphics.moveTo(coor.x, coor.y);
+                shape.graphics.moveTo(0, 0);
+				shape.x = coor.x;
+				shape.y = coor.y
             },
             rect: function(shape, coor) {
             },
@@ -314,17 +362,23 @@
          */
         var drawingCommands = {
             line: function(shape, coor) {
-                shape.graphics.moveTo(stPoint.x, stPoint.y).lineTo(coor.x, coor.y);
+                shape.graphics.moveTo(0, 0).lineTo(coor.x, coor.y);
+                shape.x = stPoint.x;
+                shape.y = stPoint.y;
             },
             free: function(shape, coor) {
-                shape.graphics.lineTo(coor.x, coor.y);
+                shape.graphics.lineTo(coor.x - stPoint.x, coor.y - stPoint.y);
             },
             rect: function(shape, coor) {
-                shape.graphics.rect(stPoint.x, stPoint.y, coor.x - stPoint.x, coor.y - stPoint.y);
+                shape.graphics.rect(0, 0, coor.x - stPoint.x, coor.y - stPoint.y);
+                shape.x = stPoint.x;
+                shape.y = stPoint.y;
             },
             circle:  function(shape, coor) {
                 var r = Math.sqrt((coor.x - stPoint.x) * (coor.x - stPoint.x) + (coor.y - stPoint.y) * (coor.y - stPoint.y));
-                shape.graphics.drawCircle(stPoint.x, stPoint.y, r);
+                shape.graphics.drawCircle(0, 0, r);
+                shape.x = stPoint.x;
+                shape.y = stPoint.y;
             },
             text:  function(text, coor) {
                 text.x = coor.x;
@@ -341,30 +395,48 @@
          */
         var drawFinCommands = {
             line: function(shape, coor) {
-                shape.graphics.moveTo(stPoint.x, stPoint.y).lineTo(coor.x, coor.y);
+                shape.graphics.moveTo(0, 0).lineTo(coor.x, coor.y);
+                shape.x = stPoint.x;
+                shape.y = stPoint.y;
             },
             free: function(shape, coor) {
                 //TODO: これだと，始点と終点が同じならば，筆を動かしていても点と判断してしまうので，要対応
                 if (coor.x === stPoint.x && coor.y === stPoint.y) {
                     //全く動いてないときは線でなくて小さい四角を書く
-                    shape.graphics.rect(coor.x, coor.y, 1, 1);
+                    shape.graphics.rect(0, 0, 1, 1);
                 }
-                shape.graphics.lineTo(coor.x, coor.y);
+                shape.graphics.lineTo(coor.x - stPoint.x, coor.y - stPoint.y);
             },
             rect: function(shape, coor) {
-                shape.graphics.rect(stPoint.x, stPoint.y, coor.x - stPoint.x, coor.y - stPoint.y);
+				var width = coor.x - stPoint.x;
+				var height = coor.y - stPoint.y;
+                shape.graphics.rect(0, 0, width, height);
+
+				//EaselJSだと以下の座標を取得できないので自前で値を設定する
+                shape.stX = stPoint.x;
+                shape.stY = stPoint.y;
+				shape.width = width;
+				shape.height = height;
             },
             circle:  function(shape, coor) {
+
                 var r = Math.sqrt((coor.x - stPoint.x) * (coor.x - stPoint.x) + (coor.y - stPoint.y) * (coor.y - stPoint.y));
-                shape.graphics.drawCircle(stPoint.x, stPoint.y, r);
+
+                shape.graphics.drawCircle(0, 0, r);
+
+				//EaselJSだと以下の座標を取得できないので自前で値を設定する
+                shape.stX = stPoint.x - r;
+                shape.stY = stPoint.y - r;
+				shape.width = r * 2;
+				shape.height = r * 2;
             },
-            text:  function(shape, coor) {
-                shape.x = coor.x;
-                shape.y = coor.y;
+            text:  function(text, coor) {
+                text.x = coor.x;
+                text.y = coor.y;
             },
-            img:  function(shape, coor) {
-                shape.x = coor.x;
-                shape.y = coor.y;
+            img:  function(bitmap, coor) {
+                bitmap.x = coor.x;
+                bitmap.y = coor.y;
             }
         };
 
@@ -511,6 +583,20 @@
                     }
                 });
             }
+			//targetにクリックイベンを設定する
+			target.onClick = function(e){
+				if(eventFuncs.click) {
+					eventFuncs.click(e, this);
+				}
+
+				console.log('draw-CLICK');
+			};
+			target.onPress = function(e){
+				if(eventFuncs.press) {
+					eventFuncs.press(e, this);
+				}
+				console.log('draw-PRESS');
+			};
             //描画系後処理
             stage.update();
             target = null;
@@ -571,6 +657,12 @@
                 params[i] = prms[i];
             }
         };
+
+		this.setEventFuncs = function(funcs){
+			for (var i in funcs) {
+                eventFuncs[i] = funcs[i];
+            }
+		};
 
         this.setSendFunc = function(func) {
             params.sendFunc = func;
@@ -666,17 +758,28 @@
                     mode: 'free',
                     color: '#000000',
                     text: 'hoge',
-                    lineWidth: 3,
+                    lineWidth: 10,
                     font: '22px Arial',
                     img: null
                 });
 
                 //選択モード用のロジック
-                var selectLogic;	//TODO: あとで作る
+                var selectLogic = new SelectLogic(uid, stage);
+				selectLogic.setParameters({
+					expansionButtonsColor: '#ff0000',
+					expansionButtonsSize: 5,
+					moveFrameColor: '#00FF00',
+					moveFrameLineWidth: 15,
+					turnButtonsColor: '#0000FF',
+					turnButtonsSize: 5
+				});
+
+				//図形をClickした時などのイベント処理用関数を設定
+				drawLogic.setEventFuncs({press: selectLogic.select});
 
                 var logic = drawLogic;	//	defaultは描画モード
 
-                canvas.data(LOGICS, {drawLogic: drawLogic, selectLogic: selectLogic});
+                canvas.data(LOGICS, {logic: logic, drawLogic: drawLogic, selectLogic: selectLogic});
 
                 //TODO: 塗り潰しは未実装
 
@@ -729,6 +832,10 @@
                 var startEvent = function(e) {
                     e.preventDefault();
 
+					//使用するlogicを更新する
+					var logics = canvas.data(LOGICS);
+            		logic = logics.logic;
+
                     //コマンド実行
                     logic.start(getCanvasCoor(e));
 
@@ -752,6 +859,7 @@
 
                     //コマンド実行
                     logic.finish(getCanvasCoor(e));
+					
                 };
                 canvas.on('touchend', canvas, finEvent);
                 canvas.on('mouseup', canvas, finEvent);
@@ -772,6 +880,20 @@
             logics.drawLogic.setParameters({mode: md});
             return canvas;
         },
+		wbShareSetPhase: function(phase) {
+            var canvas = this;
+            var logics = canvas.data(LOGICS);
+			if(phase === 'select') {
+				logics.logic = logics.selectLogic;
+				canvas.data(LOGICS, logics);
+				console.log('PHASE: SELECT');
+			} else if(phase === 'draw') {
+				logics.logic = logics.drawLogic;
+				canvas.data(LOGICS, logics);
+				console.log('PHASE: DRAW');
+			}
+			return canvas;
+		},
         wbShareSetText: function(txt) {
             var canvas = this;
             var logics = canvas.data(LOGICS);

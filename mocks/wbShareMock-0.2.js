@@ -33,7 +33,10 @@ $(function() {
 	});
 
 	$('#selBtn').click(function(e) {
-		$('#canvas').wbShareSetMode('sel');
+		$('#canvas').wbShareSetPhase('select');
+	});
+	$('#drwBtn').click(function(e) {
+		$('#canvas').wbShareSetPhase('draw');
 	});
 	$('#lineBtn').click(function(e) {
 		$('#canvas').wbShareSetMode('line');
