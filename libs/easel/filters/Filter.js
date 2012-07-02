@@ -1,5 +1,5 @@
 /*
-* Point by Grant Skinner. Dec 5, 2010
+* Filter by Grant Skinner. Mar 7, 2011
 * Visit http://easeljs.com/ for documentation, updates and examples.
 *
 *
@@ -37,53 +37,48 @@
 (function(window) {
 
 /**
-* Represents a point on a 2 dimensional x / y coordinate system.
-* @class Point
+* Base class that all filters should inherit from.
+* @class Filter
 * @constructor
-* @param {Number} x X position. Default is 0.
-* @param {Number} y Y position. Default is 0.
 **/
-var Point = function(x, y) {
-  this.initialize(x, y);
+var Filter = function() {
+  this.initialize();
 }
-var p = Point.prototype;
-	
-// public properties:
-
-	/** 
-	 * X position. 
-	 * @property x
-	 * @type Number
-	 **/
-	p.x = 0;
-	
-	/** 
-	 * Y position. 
-	 * @property y
-	 * @type Number
-	 **/
-	p.y = 0;
+var p = Filter.prototype;
 	
 // constructor:
 	/** 
 	 * Initialization method.
 	 * @method initialize
 	 * @protected
-	*/
-	p.initialize = function(x, y) {
-		this.x = (x == null ? 0 : x);
-		this.y = (y == null ? 0 : y);
-	}
+	 **/
+	p.initialize = function() {}
 	
 // public methods:
 	/**
-	 * Returns a clone of the Point instance.
-	 * @method clone
-	 * @return {Point} a clone of the Point instance.
+	 * Returns a rectangle with values indicating the margins required to draw the filter.
+	 * For example, a filter that will extend the drawing area 4 pixels to the left, and 7 pixels to the right
+	 * (but no pixels up or down) would return a rectangle with (x=-4, y=0, width=11, height=0).
+	 * @method getBounds
+	 * @return {Rectangle} a rectangle object indicating the margins required to draw the filter.
 	 **/
-	p.clone = function() {
-		return new Point(this.x, this.y);
+	p.getBounds = function() {
+		return new Rectangle(0,0,0,0);
 	}
+	
+	/**
+	 * Applies the filter to the specified context.
+	 * @method applyFilter
+	 * @param ctx The 2D context to use as the source.
+	 * @param x The x position to use for the source rect.
+	 * @param y The y position to use for the source rect.
+	 * @param width The width to use for the source rect.
+	 * @param height The height to use for the source rect.
+	 * @param targetCtx Optional. The 2D context to draw the result to. Defaults to the context passed to ctx.
+	 * @param targetX Optional. The x position to draw the result to. Defaults to the value passed to x.
+	 * @param targetY Optional. The y position to draw the result to. Defaults to the value passed to y.
+	 **/
+	p.applyFilter = function(ctx, x, y, width, height, targetCtx, targetX, targetY) {}
 
 	/**
 	 * Returns a string representation of this object.
@@ -91,8 +86,18 @@ var p = Point.prototype;
 	 * @return {String} a string representation of the instance.
 	 **/
 	p.toString = function() {
-		return "[Point (x="+this.x+" y="+this.y+")]";
+		return "[Filter]";
 	}
 	
-window.Point = Point;
+	
+	/**
+	 * Returns a clone of this Filter instance.
+	 * @method clone
+	 @return {Filter} A clone of the current Filter instance.
+	 **/
+	p.clone = function() {
+		return new Filter();
+	}
+	
+window.Filter = Filter;
 }(window));
