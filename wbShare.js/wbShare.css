@@ -1,0 +1,30 @@
+.mainCanvas{
+    position: absolute;
+    top: 0px;
+    left: 0px;
+    background-color: rgba(255, 255, 255,1.0);
+    z-index: 10000;
+}
+.tmpCanvas{
+    position: absolute;
+    top: 0px;
+    left: 0px;
+    background-color: rgba(0,255,100,0.0);
+    z-index: 10001;
+}
+
+.selectCanvas{
+    position: absolute;
+    top: 0px;
+    left: 0px;
+    background-color: rgba(225,155,100,0.0);
+    z-index: 9999;
+}
+
+/*wbShareでcanvasのz-indexを高めに設定しているので調整*/
+.modal{
+    z-index: 11050;
+}
+.modal-backdrop{
+    z-index: 11040;
+}

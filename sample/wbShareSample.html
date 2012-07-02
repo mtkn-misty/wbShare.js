@@ -1,0 +1,112 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF8">
+    <link rel="stylesheet" href="../wbShare.js/wbShare.css" type="text/css">
+    <link rel="stylesheet" href="./wbShareSample.css" type="text/css">
+    <title>サンプル</title>
+</head>
+<body>
+<div id="frame">
+
+    <ul id="additionalBtn">
+        <li><input type="button" id="helpBtn" value="ヘルプ"></li>
+
+    </ul>
+    <div id="toolBox">
+        <ul id="shape">
+            <li><input type="button" id="select" value="⇖"><span class="help">図形の選択と選択した図形の移動をします</span></li>
+            <hr/>
+            <li><input type="button" id="freeHand" value="ぬ"><span class="help">フリーハンドで描きます</span></li>
+            <li><input type="button" id="line" value="／"><span class="help">直線を引きます</span></li>
+            <li><input type="button" id="rect" value="□"><span class="help">四角形を描きます</span></li>
+            <li><input type="button" id="circle" value="○"><span class="help">円を描きます</span></li>
+            <li><input type="button" id="text" value="T"><span class="help">テキストをはりつけます</span></li>
+            <li><input type="button" id="img" value="画"><span class="help">画像をはりつけます</span></li>
+            <!-- 未実装 <li><label for="fill">塗潰</label><input type="checkbox" id="fill" value=false></li>-->
+        </ul>
+        <hr/>
+        <ul id="penSize">
+            <li><input type="button" id="largePen" value="大"><span class="help">ペンのサイズを大にします</span></li>
+            <li><input type="button" id="midPen" value="中"><span class="help">ペンのサイズを中にします</span></li>
+            <li><input type="button" id="smallPen" value="小"><span class="help">ペンのサイズを小にします</span></li>
+        </ul>
+        <hr/>
+        <ul>
+            <li><input type="button" id="freeHandData" value="データ"><span class="help">フリーハンドの描画データを投入します</span></li>
+        </ul>
+    </div>
+    <div id="canvasDiv"></div>
+    <div id="pallet">
+        <ul id="colorPallet">
+            <li><input type="button" id="black" value=""></li>
+            <li><input type="button" id="red" value=""></li>
+            <li><input type="button" id="yellow" value=""></li>
+            <li><input type="button" id="green" value=""></li>
+            <li><input type="button" id="cyan" value=""></li>
+            <li><input type="button" id="blue" value=""></li>
+            <li><input type="button" id="pink" value=""></li>
+        </ul>
+        <ul id="controlPallet">
+            <li><input type="button" id="delete" value="削除"></li>
+            <!--未実装
+                <li><input type="button" id="scale" value="未-拡大"></li>
+                <li><input type="button" id="rotate" value="未-回転"></li>
+            -->
+        </ul>
+    </div>
+</div>
+
+
+<div id="modalDlg" class="hidden">
+    <div id="inputTextDlg">
+        <h1>文字を入力してください</h1>
+        <input id="inputText" type="text"/>
+        <input id="inputTextBtn" type="button" value="決定"/>
+    </div>
+
+    <div id="uploadImgDlg">
+        <h1>この画像をはりつけます</h1>
+        <img id="imgSample" src="./image.jpg"/>
+        <input id="imgBtn" type="button" value="決定"/>
+    </div>
+</div>
+
+<script type="text/javascript" src="http://code.jquery.com/jquery-1.7.2.js">
+</script>
+<script type="text/javascript" src="../libs/easel/utils/UID.js">
+</script>
+<script type="text/javascript" src="../libs/easel/geom/Matrix2D.js">
+</script>
+<script type="text/javascript" src="../libs/easel/events/MouseEvent.js">
+</script>
+<script type="text/javascript" src="../libs/easel/display/DisplayObject.js">
+</script>
+<script type="text/javascript" src="../libs/easel/display/Container.js">
+</script>
+<script type="text/javascript" src="../libs/easel/display/Stage.js">
+</script>
+<script type="text/javascript" src="../libs/easel/display/Graphics.js">
+</script>
+<script type="text/javascript" src="../libs/easel/display/Shape.js">
+</script>
+<script type="text/javascript" src="../libs/easel/display/SpriteSheet.js">
+</script>
+<script type="text/javascript" src="../libs/easel/display/Text.js">
+</script>
+<script type="text/javascript" src="../libs/easel/display/Bitmap.js">
+</script>
+<script type="text/javascript" src="../libs/easel/utils/SpriteSheetUtils.js">
+</script>
+<script type="text/javascript" src="../libs/easel/utils/Ticker.js">
+</script>
+<script type="text/javascript" src="../libs/easel/utils/UID.js">
+</script>
+<script type="text/javascript" src="../wbShare.js/wbShare.js">
+</script>
+<script type="text/javascript" src="./modal.js">
+</script>
+<script type="text/javascript" src="./wbShareSample.js">
+</script>
+</body>
+</html>
