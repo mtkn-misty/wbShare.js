@@ -32,7 +32,7 @@ USAGE
       $('#canvasDiv')
           .wbShare(userId, canvasId) //wbShareの構築。userIdとcanvasIdは通信（後述）で使用
           .wbShareSetParams({ //パラメータの設定。ペンの色・太さなどもここで設定可能。詳細は上記のDEMOを参照のこと。
-              sendFunc: function(command) {  //ユーザがCanvasに対して何らかの操作を行った際に呼び出されるコールバック関数。cammandはその内容を表す。
+              sendFunc: function(command) {  //ユーザがCanvasに対して何らかの操作を行った際に呼び出されるコールバック関数。commandはその内容を表す。
                                              //ここでWebSockeやAjaxなどによる通信をすることでユーザの操作の情報をサーバに送信できる
                   console.log(JSON.stringify(command));
               }
@@ -78,11 +78,9 @@ USAGE
 
 AUTHOR
 ----------
-Masanori Takano (mtknnktm@gmail.com)
+@mtknnktm (mtknnktm at gmail.com)
 
 Blog: Swarm of Trials (http://d.hatena.ne.jp/swarm_of_trials/)
-
-Twitter: @mtknnktm
 
 LICENSE
 ----------
