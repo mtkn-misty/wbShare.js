@@ -1,4 +1,4 @@
-Wbshare.js ノート共有 canvas系jqueryプラグイン
+wbShare.js ノート共有 canvas系jqueryプラグイン
 ======================
 
 ABSTRACT
@@ -79,7 +79,9 @@ USAGE
 AUTHOR
 ----------
 Masanori Takano (mtknnktm@gmail.com)
+
 Blog: Swarm of Trials (http://d.hatena.ne.jp/swarm_of_trials/)
+
 Twitter: @mtknnktm
 
 LICENSE
