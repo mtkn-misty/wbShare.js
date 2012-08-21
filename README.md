@@ -69,16 +69,17 @@ USAGE
 
 以下、2操作はCanvas上で図形をクリック / タップすることによって図形が選択されていることが前提です。
 
-* 移動
- * 選択されている図形をドラッグすることで図形を移動することができます
+移動
+* 選択されている図形をドラッグすることで図形を移動することができます
 
-* 削除
+削除
+
       //選択されている図形を削除
       $('#canvasDiv').wbShareDelete();
 
 AUTHOR
 ----------
-@mtknnktm (mtknnktm at gmail.com)
+Masanori Takano (mtknnktm at gmail.com)
 
 Blog: Swarm of Trials (http://d.hatena.ne.jp/swarm_of_trials/)
 
