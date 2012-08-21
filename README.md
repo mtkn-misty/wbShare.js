@@ -1,4 +1,4 @@
-wbShare.js ノート共有 canvas系jqueryプラグイン
+wbShare.js - ノート共有 canvas系jqueryプラグイン
 ======================
 
 ABSTRACT
