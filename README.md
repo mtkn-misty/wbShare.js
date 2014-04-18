@@ -79,7 +79,7 @@ USAGE
 
 AUTHOR
 ----------
-Masanori Takano (mtknnktm at gmail.com)
+Masanori Takano
 
 Blog: Swarm of Trials (http://d.hatena.ne.jp/swarm_of_trials/)
 
